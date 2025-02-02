@@ -15,6 +15,8 @@ class IconMarker<T> extends BasicPointMarker<T> with PaintMixin, CaptionMixin {
   final Color? color;
   final double fontSize;
   final List<Shadow>? shadows;
+  final Color? borderColor;
+  final double? borderWidth;
 
   IconMarker({
     required this.icon,
@@ -24,6 +26,8 @@ class IconMarker<T> extends BasicPointMarker<T> with PaintMixin, CaptionMixin {
     super.maxZoomLevel,
     this.shadows,
     this.fontSize = 26,
+    this.borderColor,
+    this.borderWidth,
     super.item,
     required ILatLong center,
     required DisplayModel displayModel,
@@ -60,6 +64,28 @@ class IconMarker<T> extends BasicPointMarker<T> with PaintMixin, CaptionMixin {
       (mappoint.y - markerContext.mapCenter.y),
     );
 
+    // Draw border if borderColor and borderWidth are specified
+    if (borderColor != null && borderWidth != null) {
+      TextPainter borderPainter = TextPainter(
+        text: TextSpan(
+          text: String.fromCharCode(icon.codePoint),
+          style: TextStyle(
+            fontSize: fontSize,
+            fontFamily: icon.fontFamily,
+            foreground: Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = borderWidth!
+              ..color = borderColor!,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      borderPainter.layout();
+      borderPainter.paint(
+          (flutterCanvas as FlutterCanvas).uiCanvas, iconPosition);
+    }
+
+    // Draw the main icon
     TextPainter textPainter = TextPainter(
       text: TextSpan(
         text: String.fromCharCode(icon.codePoint),
@@ -73,7 +99,6 @@ class IconMarker<T> extends BasicPointMarker<T> with PaintMixin, CaptionMixin {
       textDirection: TextDirection.ltr,
     );
     textPainter.layout();
-
     textPainter.paint((flutterCanvas as FlutterCanvas).uiCanvas, iconPosition);
   }
 
