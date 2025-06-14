@@ -4,8 +4,8 @@ import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:logging/logging.dart';
 import 'package:mapsforge_flutter/src/model/displaymodel.dart';
-import 'package:mapsforge_flutter/src/rendertheme/renderinstruction/renderinstruction_hillshading.dart';
 import 'package:mapsforge_flutter/src/rendertheme/rule/rule.dart';
+import 'package:mapsforge_flutter/src/rendertheme/xml/renderinstruction/renderinstruction_hillshading.dart';
 import 'package:mapsforge_flutter/src/rendertheme/xml/xmlutils.dart';
 import 'package:mapsforge_flutter/src/utils/mapsforge_constants.dart';
 import 'package:xml/xml.dart';
@@ -45,19 +45,27 @@ class RenderThemeBuilder {
 
   String forHash = "";
 
-  RenderThemeBuilder();
+  /// New: a set of element IDs to exclude from rendering.
+  final Set<String> excludeIds;
 
-  /// Builds and returns a rendertheme by loading a rendertheme-file. This
-  /// is a convienience-function. If desired we can also implement some caching
-  /// so that we do not need to parse the same file over and over again.
-  static Future<RenderTheme> create(
-      DisplayModel displayModel, String filename) async {
-    ByteData bytes = await rootBundle.load(filename);
-    String content = const Utf8Decoder().convert(bytes.buffer.asUint8List());
+  // Constructor now accepts an optional excludeIds parameter.
+  RenderThemeBuilder({Set<String>? excludeIds}) : excludeIds = excludeIds ?? {};
+
+  static RenderTheme parse(DisplayModel displayModel, String content) {
     RenderThemeBuilder renderThemeBuilder = RenderThemeBuilder();
     renderThemeBuilder.parseXml(displayModel, content);
-    renderThemeBuilder.forHash =
-        "${displayModel.deviceScaleFactor}_${displayModel.fontScaleFactor}_${MapsforgeConstants().tileSize}";
+    return renderThemeBuilder.build();
+  }
+
+  /// Builds and returns a rendertheme by loading a rendertheme file. This
+  /// is a convienience-function. If desired we can also implement some caching
+  /// so that we do not need to parse the same file over and over again.
+  static Future<RenderTheme> create(DisplayModel displayModel, String filename, {Set<String>? excludeIds}) async {
+    ByteData bytes = await rootBundle.load(filename);
+    String content = const Utf8Decoder().convert(bytes.buffer.asUint8List());
+    RenderThemeBuilder renderThemeBuilder = RenderThemeBuilder(excludeIds: excludeIds);
+    renderThemeBuilder.parseXml(displayModel, content);
+    renderThemeBuilder.forHash = "${displayModel.deviceScaleFactor}_${displayModel.fontScaleFactor}_${MapsforgeConstants().tileSize}";
     RenderTheme renderTheme = renderThemeBuilder.build();
     return renderTheme;
   }
@@ -69,8 +77,10 @@ class RenderThemeBuilder {
     assert(ruleBuilderStack.length > 0);
     RenderTheme renderTheme = RenderTheme(this);
     ruleBuilderStack.forEach((ruleBuilder) {
-      Rule rule = ruleBuilder.build();
-      renderTheme.addRule(rule);
+      if (!ruleBuilder.impossible) {
+        Rule rule = ruleBuilder.build();
+        renderTheme.addRule(rule);
+      }
     });
     return renderTheme;
   }
@@ -95,8 +105,7 @@ class RenderThemeBuilder {
         case XmlNodeType.ELEMENT:
           {
             XmlElement element = node as XmlElement;
-            if (element.name.toString() != "rendertheme")
-              throw Exception("Invalid root node ${element.name.toString()}");
+            if (element.name.toString() != "rendertheme") throw Exception("Invalid root node ${element.name.toString()}");
             foundRendertheme = true;
             _parseRendertheme(displayModel, element);
             break;
@@ -106,7 +115,6 @@ class RenderThemeBuilder {
         case XmlNodeType.CDATA:
           throw Exception("Invalid node ${node.nodeType.toString()}");
         case XmlNodeType.COMMENT:
-          // throw Exception("Invalid node ${node.nodeType.toString()}");
           break;
         case XmlNodeType.DOCUMENT:
           throw Exception("Invalid node ${node.nodeType.toString()}");
@@ -116,7 +124,8 @@ class RenderThemeBuilder {
           throw Exception("Invalid node ${node.nodeType.toString()}");
         case XmlNodeType.DECLARATION:
           break;
-        default: break;
+        default:
+          break;
       }
     }
     assert(foundRendertheme);
@@ -127,11 +136,10 @@ class RenderThemeBuilder {
   }
 
   void _parseRendertheme(DisplayModel displayModel, XmlElement rootElement) {
-    rootElement.attributes.forEach((element) {
-      String name = element.name.toString();
-      String value = element.value;
+    rootElement.attributes.forEach((attribute) {
+      String name = attribute.name.toString();
+      String value = attribute.value;
       //_log.info("checking $name=$value");
-
       if (XMLNS == name) {
         return;
       } else if (XMLNS_XSI == name) {
@@ -141,7 +149,7 @@ class RenderThemeBuilder {
       } else if (VERSION == name) {
         this.version = int.parse(value);
         if (this.version > RENDER_THEME_VERSION) {
-          throw new Exception("unsupported render theme version: $version");
+          throw Exception("unsupported render theme version: $version");
         }
       } else if (MAP_BACKGROUND == name) {
 //        this.mapBackground = XmlUtils.getColor(
@@ -155,12 +163,11 @@ class RenderThemeBuilder {
       } else if (BASE_TEXT_SIZE == name) {
         this.baseTextSize = XmlUtils.parseNonNegativeFloat(name, value);
       } else {
-        throw Exception(name + "=" + value);
+        throw Exception("$name=$value");
       }
     });
     assert(rootElement.children.length > 0);
     bool foundElement = false;
-    bool foundRule = false;
     for (XmlNode node in rootElement.children) {
       switch (node.nodeType) {
         case XmlNodeType.TEXT:
@@ -172,14 +179,13 @@ class RenderThemeBuilder {
             XmlElement element = node as XmlElement;
             foundElement = true;
             if (element.name.toString() == "rule") {
-              RuleBuilder ruleBuilder = RuleBuilder(null, _level);
+              // Pass the excludeIds from this builder into each new RuleBuilder.
+              RuleBuilder ruleBuilder = RuleBuilder(displayModel, null, _level, excludeIds: excludeIds);
               ruleBuilder.parse(displayModel, element);
               ruleBuilderStack.add(ruleBuilder);
-              foundRule = true;
               ++_level;
               maxLevel = max(maxLevel, _level);
               maxLevel = max(maxLevel, ruleBuilder.maxLevel);
-              //print("Time ${DateTime.now().millisecondsSinceEpoch - time} after rule ${element.toString()}");
               break;
             } else if ("hillshading" == element.name.toString()) {
               String? category = null;
@@ -200,12 +206,8 @@ class RenderThemeBuilder {
                 } else if ("zoom-max" == name) {
                   maxZoom = XmlUtils.parseNonNegativeByte("zoom-max", value);
                 } else if ("magnitude" == name) {
-                  magnitude =
-                      XmlUtils.parseNonNegativeInteger("magnitude", value)
-                          .toDouble();
-                  if (magnitude > 255)
-                    throw new Exception(
-                        "Attribute 'magnitude' must not be > 255");
+                  magnitude = XmlUtils.parseNonNegativeInteger("magnitude", value).toDouble();
+                  if (magnitude > 255) throw new Exception("Attribute 'magnitude' must not be > 255");
                 } else if ("always" == name) {
                   always = "true" == (value);
                 } else if ("layer" == name) {
@@ -213,16 +215,14 @@ class RenderThemeBuilder {
                 }
               });
 
-              RenderinstructionHillshading hillshading = RenderinstructionHillshading(
-                  minZoom, maxZoom, magnitude, layer, always, _level);
-
+              RenderinstructionHillshading hillshading = RenderinstructionHillshading(minZoom, maxZoom, magnitude, layer, always, _level);
 //      if (this.categories == null || category == null || this.categories.contains(category)) {
               //hillShadings.add(hillshading);
 //      }
               //print("Time ${DateTime.now().millisecondsSinceEpoch - time} after hillshading");
               break;
             } else if ("stylemenu" == element.name.toString()) {
-              // TODO handle this case (Andrea)
+              // TODO: handle stylemenu if needed.
               break;
             }
             throw Exception("Invalid node ${element.name.toString()}");
@@ -241,7 +241,8 @@ class RenderThemeBuilder {
           throw Exception("Invalid node ${node.nodeType.toString()}");
         case XmlNodeType.DECLARATION:
           break;
-        default: break;
+        default:
+          break;
       }
     }
     assert(foundElement);

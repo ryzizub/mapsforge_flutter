@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 // import 'package:leak_tracker/devtools_integration.dart';
 // import 'package:leak_tracker/leak_tracker.dart';
 import 'package:mapsforge_example/filemgr.dart';
 import 'package:mapsforge_example/map-view-page2.dart';
 import 'package:mapsforge_example/pathhandler.dart';
+import 'package:mapsforge_flutter/datastore.dart';
 import 'package:mapsforge_flutter/maps.dart';
 
 import 'map-file-data.dart';
@@ -17,8 +20,7 @@ import 'map-file-data.dart';
 class MapDownloadPage extends StatefulWidget {
   final MapFileData mapFileData;
 
-  const MapDownloadPage({Key? key, required this.mapFileData})
-      : super(key: key);
+  const MapDownloadPage({Key? key, required this.mapFileData}) : super(key: key);
 
   @override
   MapDownloadPageState createState() => MapDownloadPageState();
@@ -73,16 +75,12 @@ class MapDownloadPageState extends State<MapDownloadPage> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
               CircularProgressIndicator(
-                value: downloadProgress == null || downloadProgress == 1
-                    ? null
-                    : downloadProgress,
+                value: downloadProgress == null || downloadProgress == 1 ? null : downloadProgress,
               ),
               const SizedBox(height: 20),
               Center(
                 child: Text(
-                  downloadProgress == null || downloadProgress == 1
-                      ? "Loading"
-                      : "Downloading ${(downloadProgress! * 100).round()} %",
+                  downloadProgress == null || downloadProgress == 1 ? "Loading" : "Downloading ${(downloadProgress! * 100).round()} %",
                 ),
               ),
             ],
@@ -101,41 +99,43 @@ class MapDownloadPageState extends State<MapDownloadPage> {
     PathHandler pathHandler = await FileMgr().getLocalPathHandler("");
     if (await pathHandler.exists(fileName)) {
       // file already exists locally, start now
-      final MapFile mapFile =
-          await MapFile.from(pathHandler.getPath(fileName), null, null);
+      final Datastore mapFile = await IsolateMapfile.create(pathHandler.getPath(fileName));
+      //await MapFile.from(pathHandler.getPath(fileName), null, null);
       await _startMap(mapFile);
-    } else {
-      bool ok = await FileMgr().downloadToFile2(
-          widget.mapFileData.url, pathHandler.getPath(fileName));
+    } else if (widget.mapFileData.url.startsWith("http")) {
+      bool ok = await FileMgr().downloadToFile2(widget.mapFileData.url, pathHandler.getPath(fileName));
       if (!ok) {
         error = "Error while putting the downloadrequest in the queue";
         if (mounted) setState(() {});
       }
+    } else {
+      ByteData data = await rootBundle.load(widget.mapFileData.url);
+      List<int> bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      await File(pathHandler.getPath(fileName)).writeAsBytes(bytes);
+      final Datastore mapFile = await IsolateMapfile.create(pathHandler.getPath(fileName));
+      await _startMap(mapFile);
     }
   }
 
   Future<void> _switchToMap(List<int>? content) async {
     if (content != null) {
       // file downloaded into memory
-      MapFile mapFile =
-          await MapFile.using(Uint8List.fromList(content), null, null);
+      MapFile mapFile = await MapFile.using(Uint8List.fromList(content), null, null);
       await _startMap(mapFile);
     } else {
       // file is here, hope that _prepareOfflineMap() is happy and prepares the map for us.
       String fileName = widget.mapFileData.fileName;
 
       PathHandler pathHandler = await FileMgr().getLocalPathHandler("");
-      final MapFile mapFile =
-          await MapFile.from(pathHandler.getPath(fileName), null, null);
+      final Datastore mapFile = await IsolateMapfile.create(pathHandler.getPath(fileName));
       await _startMap(mapFile);
     }
   }
 
-  Future<void> _startMap(MapFile mapFile) async {
+  Future<void> _startMap(Datastore mapFile) async {
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (BuildContext context) =>
-            MapViewPage2(mapFileData: widget.mapFileData, mapFile: mapFile),
+        builder: (BuildContext context) => MapViewPage2(mapFileData: widget.mapFileData, datastore: mapFile),
       ),
     );
     mapFile.dispose();
@@ -148,6 +148,5 @@ class MapDownloadPageState extends State<MapDownloadPage> {
     //     print("not gced: ${element.toYaml("  ")}");
     //   });
     // });
-
   }
 }

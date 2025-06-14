@@ -1,5 +1,11 @@
 import '../../graphics/position.dart';
 import '../../model/maprectangle.dart';
+import '../nodeproperties.dart';
+import '../noderenderinfo.dart';
+import '../rendercontext.dart';
+import '../wayproperties.dart';
+import '../wayrenderinfo.dart';
+import '../xml/symbol_finder.dart';
 import 'bitmapsrcmixin.dart';
 import 'shape.dart';
 
@@ -12,12 +18,15 @@ class ShapeSymbol extends Shape with BitmapSrcMixin {
 
   ShapeSymbol.base(int level) : super.base(level: level);
 
-  ShapeSymbol.scale(ShapeSymbol base, int zoomLevel)
+  ShapeSymbol.scale(ShapeSymbol base, int zoomLevel, SymbolFinder symbolFinder)
       : super.scale(base, zoomLevel) {
     bitmapSrcMixinScale(base, zoomLevel);
     position = base.position;
     theta = base.theta;
     id = base.id;
+    if (id != null) {
+      symbolFinder.add(id!, this);
+    }
   }
 
   @override
@@ -29,9 +38,6 @@ class ShapeSymbol extends Shape with BitmapSrcMixin {
 
     switch (position) {
       case Position.AUTO:
-        this.boundary =
-            MapRectangle(-halfWidth, -halfHeight, halfWidth, halfHeight);
-        break;
       case Position.CENTER:
         this.boundary =
             MapRectangle(-halfWidth, -halfHeight, halfWidth, halfHeight);
@@ -70,16 +76,35 @@ class ShapeSymbol extends Shape with BitmapSrcMixin {
         break;
     }
 
+    //print("boundary: $boundary $id $bitmapSrc");
     return boundary!;
   }
 
   @override
   String toString() {
-    return 'SymbolContainer{theta: $theta, super ${super.toString()}';
+    return 'ShapeSymbol{level: $level, position: $position, theta: $theta, id: $id}';
   }
 
   @override
   String getShapeType() {
     return "Symbol";
+  }
+
+  @override
+  void renderNode(RenderContext renderContext, NodeProperties nodeProperties) {
+    if (bitmapSrc == null) return;
+    renderContext.labels.add(NodeRenderInfo(nodeProperties, this));
+  }
+
+  @override
+  void renderWay(
+      final RenderContext renderContext, WayProperties wayProperties) {
+    if (bitmapSrc == null) return;
+
+    if (wayProperties.getCoordinatesAbsolute(renderContext.projection).length ==
+        0) return;
+
+    renderContext.addToClashDrawingLayer(
+        level, WayRenderInfo(wayProperties, this));
   }
 }

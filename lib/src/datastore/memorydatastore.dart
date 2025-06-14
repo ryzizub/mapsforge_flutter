@@ -3,6 +3,7 @@ import 'package:mapsforge_flutter/src/datastore/datastore.dart';
 import 'package:mapsforge_flutter/src/datastore/datastorereadresult.dart';
 import 'package:mapsforge_flutter/src/datastore/pointofinterest.dart';
 import 'package:mapsforge_flutter/src/datastore/way.dart';
+import 'package:mapsforge_flutter/src/model/boundingbox.dart';
 import 'package:mapsforge_flutter/src/model/tile.dart';
 
 class MemoryDatastore extends Datastore {
@@ -11,6 +12,12 @@ class MemoryDatastore extends Datastore {
 
   /// The read ways.
   final List<Way> ways = [];
+
+  @override
+  void dispose() {
+    pointOfInterests.clear();
+    ways.clear();
+  }
 
   @override
   Future<DatastoreReadResult> readLabels(Tile upperLeft, Tile lowerRight) {
@@ -32,14 +39,12 @@ class MemoryDatastore extends Datastore {
 
   @override
   Future<DatastoreReadResult> readMapDataSingle(Tile tile) {
-    Projection projection = MercatorProjection.fromZoomlevel(tile.zoomLevel);
     List<PointOfInterest> poiResults = pointOfInterests
-        .where((poi) =>
-            tile.getBoundingBox(projection).containsLatLong(poi.position))
+        .where((poi) => tile.getBoundingBox().containsLatLong(poi.position))
         .toList();
     List<Way> wayResults = [];
     for (Way way in ways) {
-      if (tile.getBoundingBox(projection).intersectsArea(way.latLongs)) {
+      if (tile.getBoundingBox().intersectsArea(way.latLongs)) {
         wayResults.add(way);
       }
     }
@@ -60,9 +65,9 @@ class MemoryDatastore extends Datastore {
   }
 
   @override
-  bool supportsTile(Tile tile, Projection projection) {
+  Future<bool> supportsTile(Tile tile) {
     // you may want to show neighbouring tiles too in order to display labels.
-    return true;
+    return Future.value(true);
     // Projection projection = MercatorProjection.fromZoomlevel(tile.zoomLevel);
     // for (PointOfInterest poi in pointOfInterests) {
     //   if (projection.boundingBoxOfTile(tile).containsLatLong(poi.position)) return true;
@@ -91,7 +96,7 @@ class MemoryDatastore extends Datastore {
   }
 
   @override
-  Future<void> lateOpen() {
-    return Future.value(null);
+  Future<BoundingBox> getBoundingBox() {
+    return Future.value(Projection.BOUNDINGBOX_MAX);
   }
 }

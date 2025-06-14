@@ -2,7 +2,6 @@ import 'dart:core';
 
 import 'package:mapsforge_flutter/src/datastore/datastore.dart';
 
-import '../model/boundingbox.dart';
 import '../model/latlong.dart';
 import '../model/tag.dart';
 import '../model/tile.dart';
@@ -10,43 +9,6 @@ import 'datastorereadresult.dart';
 
 /// Base class for map data retrieval.
 abstract class MapDataStore extends Datastore {
-  /// Extracts substring of preferred language from multilingual string.<br/>
-  /// Example multilingual string: "Base\ren\bEnglish\rjp\bJapan\rzh_py\bPin-yin".
-  /// <p/>
-  /// Use '\r' delimiter among names and '\b' delimiter between each language and name.
-  static String? extract(String s, String? language) {
-    if (s.trim().length == 0) {
-      return null;
-    }
-
-    List<String> langNames = s.split("\r");
-    if (language == null || language.trim().length == 0) {
-      return langNames[0];
-    }
-
-    String? fallback;
-    for (int i = 1; i < langNames.length; i++) {
-      List<String> langName = langNames[i].split("\b");
-      if (langName.length != 2) {
-        continue;
-      }
-
-      // Perfect match
-      if (langName[0].toLowerCase() == language.toLowerCase()) {
-        return langName[1];
-      }
-
-      // Fall back to base, e.g. zh-min-lan -> zh
-      if (fallback == null &&
-          !langName[0].contains("-") &&
-          (language.contains("-") || language.contains("_")) &&
-          language.toLowerCase().startsWith(langName[0].toLowerCase())) {
-        fallback = langName[1];
-      }
-    }
-    return (fallback != null) ? fallback : langNames[0];
-  }
-
   /// the preferred language when extracting labels from this data store. The actual
   /// implementation is up to the concrete implementation, which can also simply ignore
   /// this setting.
@@ -55,24 +17,15 @@ abstract class MapDataStore extends Datastore {
   /// Ctor for MapDataStore setting preferred language.
   ///
   /// @param language the preferred language or null if default language is used.
+  /// Make sure the language is trim()-ed and toLowerCase()-ed and not empty like so:
+  /// super((language?.trim().toLowerCase().isEmpty ?? true) ? null : language?.trim().toLowerCase())
   const MapDataStore(String? language) : preferredLanguage = language;
-
-  /// Returns the area for which data is supplied.
-  ///
-  /// @return bounding box of area.
-  BoundingBox? get boundingBox;
-
-  /// Extracts substring of preferred language from multilingual string using
-  /// the preferredLanguage setting.
-  String? extractLocalized(String s) {
-    return MapDataStore.extract(s, preferredLanguage);
-  }
 
   /// Returns the timestamp of the data used to render a specific tile.
   ///
   /// @param tile A tile.
   /// @return the timestamp of the data used to render the tile
-  int? getDataTimestamp(Tile tile);
+  Future<int?> getDataTimestamp(Tile tile);
 
   /// Reads only labels for tile. Labels are pois as well as ways that carry a name tag.
   /// It is permissible for the MapDataStore to return more data.
@@ -201,5 +154,43 @@ abstract class MapDataStore extends Datastore {
   /// @return true if the way should be included in the result set
   bool wayAsLabelTagFilter(List<Tag> tags) {
     return false;
+  }
+
+  /// Extracts substring of preferred language from multilingual string.<br/>
+  /// Example multilingual string: "Base\ren\bEnglish\rjp\bJapan\rzh_py\bPin-yin".
+  /// <p/>
+  /// Use '\r' delimiter among names and '\b' delimiter between each language and name.
+  String? extractLocalized(String s) {
+    if (s.trim().isEmpty) {
+      return null;
+    }
+
+    List<String> langNames = s.toLowerCase().split("\r");
+    if (preferredLanguage == null) {
+      return langNames[0];
+    }
+    String lang = preferredLanguage!;
+
+    String? fallback;
+    for (int i = 1; i < langNames.length; i++) {
+      List<String> langName = langNames[i].split("\b");
+      if (langName.length != 2) {
+        continue;
+      }
+
+      // Perfect match
+      if (langName[0] == preferredLanguage) {
+        return langName[1];
+      }
+
+      // Fall back to base, e.g. zh-min-lan -> zh
+      if (fallback == null &&
+          !langName[0].contains("-") &&
+          (lang.contains("-") || lang.contains("_")) &&
+          lang.startsWith(langName[0])) {
+        fallback = langName[1];
+      }
+    }
+    return (fallback != null) ? fallback : langNames[0];
   }
 }

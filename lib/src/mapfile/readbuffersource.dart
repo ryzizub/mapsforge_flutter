@@ -1,6 +1,4 @@
-import 'dart:typed_data';
-import 'package:flutter/foundation.dart';
-import 'package:mapsforge_flutter/src/mapfile/readbuffer.dart' as readbuffer;
+import 'package:mapsforge_flutter/src/mapfile/readbuffer.dart';
 
 /// an interface for fetching data from a mapfile. The idea is to gather the data either from a physical file or from a file already in memory.
 abstract class ReadbufferSource {
@@ -8,7 +6,10 @@ abstract class ReadbufferSource {
   Future<int> length();
 
   /// closes the underlying file
-  void close();
+  void dispose();
+
+  /// frees the underlying files. This is meant to be used when sending to an isolate
+  void freeRessources();
 
   /// Reads the given amount of bytes from the file into the read buffer and resets the internal buffer position. If
   /// the capacity of the read buffer is too small, a larger one is created automatically.
@@ -16,9 +17,14 @@ abstract class ReadbufferSource {
   /// @param length the amount of bytes to read from the file.
   /// @return true if the whole data was read successfully, false otherwise.
   /// @throws IOException if an error occurs while reading the file.
-  Future<readbuffer.Readbuffer> readFromFile(
-      {int? offset, required int length});
+  Future<Readbuffer> readFromFile(int length);
 
-  /// Reads the bytes from the underlying file starting at [indexBlockPosition].
-  Future<Uint8List> readDirect(int indexBlockPosition, int indexBlockSize);
+  Future<Readbuffer> readFromFileAt(int position, int length);
+
+  /// Returns the current position in the readbuffer source
+  int getPosition();
+
+  Future<void> setPosition(int position);
+
+  Stream<List<int>> get inputStream;
 }

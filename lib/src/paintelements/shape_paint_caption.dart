@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:isolate_task_queue/isolate_task_queue.dart';
 import 'package:mapsforge_flutter/core.dart';
 import 'package:mapsforge_flutter/src/paintelements/shape_paint.dart';
 import 'package:mapsforge_flutter/src/rendertheme/shape/shape_caption.dart';
@@ -36,13 +37,27 @@ class ShapePaintCaption extends ShapePaint<ShapeCaption> {
   double _fontHeight = 0;
 
   /// The boundary of this object in pixels relative to the center of the
-  /// corresponding node or way
+  /// corresponding node or way. This is a cached value.
   MapRectangle? boundary = null;
 
-  ShapePaintCaption(ShapeCaption shape,
-      {required String caption, MapRectangle? symbolBoundary})
-      : super(shape) {
-    reinit(caption, symbolBoundary);
+  static TaskQueue _taskQueue = SimpleTaskQueue();
+
+  ShapePaintCaption._(ShapeCaption shape, {required String caption}) : super(shape) {
+    reinit(caption);
+  }
+
+  ShapePaintCaption.forMarker(ShapeCaption shape, {required String caption}) : super(shape) {
+    reinit(caption);
+  }
+
+  static Future<ShapePaintCaption> create(ShapeCaption shape, SymbolCache symbolCache, {required String caption}) async {
+    return _taskQueue.add(() async {
+      //if (shape.shapePaint != null) return shape.shapePaint! as ShapePaintCaption;
+      ShapePaintCaption shapePaint = ShapePaintCaption._(shape, caption: caption);
+      //await shapePaint.init(symbolCache);
+      //shape.shapePaint = shapePaint;
+      return shapePaint;
+    });
   }
 
   @override
@@ -50,7 +65,7 @@ class ShapePaintCaption extends ShapePaint<ShapeCaption> {
     return Future.value();
   }
 
-  void reinit(String caption, [MapRectangle? symbolBoundary]) {
+  void reinit(String caption) {
     paintFront = null;
     paintBack = null;
     front = null;
@@ -68,48 +83,31 @@ class ShapePaintCaption extends ShapePaint<ShapeCaption> {
           cap: shape.strokeCap,
           join: shape.strokeJoin,
           strokeDashArray: shape.strokeDashArray);
-    mapTextPaint = createTextPaint(
-        fontFamily: shape.fontFamily,
-        fontStyle: shape.fontStyle,
-        fontSize: shape.fontSize);
-    setCaption(caption, symbolBoundary);
+    mapTextPaint = createTextPaint(fontFamily: shape.fontFamily, fontStyle: shape.fontStyle, fontSize: shape.fontSize);
+    setCaption(caption);
   }
 
-  setCaption(String caption, [MapRectangle? symbolBoundary]) {
-    if (paintFront != null)
-      front = ParagraphCache()
-          .getEntry(caption, mapTextPaint, paintFront!, shape.maxTextWidth);
-    if (paintBack != null)
-      back = ParagraphCache()
-          .getEntry(caption, mapTextPaint, paintBack!, shape.maxTextWidth);
+  void setCaption(String caption) {
+    if (paintFront != null) front = ParagraphCache().getEntry(caption, mapTextPaint, paintFront!, shape.maxTextWidth);
+    if (paintBack != null) back = ParagraphCache().getEntry(caption, mapTextPaint, paintBack!, shape.maxTextWidth);
     _fontWidth = back?.getWidth() ?? front?.getWidth() ?? 0;
     _fontHeight = back?.getHeight() ?? front?.getHeight() ?? 0;
-    shape.calculateOffsets(_fontWidth, _fontHeight, symbolBoundary);
+    boundary = shape.calculateBoundaryWithSymbol(_fontWidth, _fontHeight);
+    //print("Boundary for $caption is $boundary and ${shape.position}");
   }
 
   @override
   MapRectangle calculateBoundary() {
     if (boundary != null) return boundary!;
-    boundary = MapRectangle(
-        -_fontWidth / 2 + shape.horizontalOffset,
-        -_fontHeight / 2 + shape.verticalOffset,
-        _fontWidth / 2 + shape.horizontalOffset,
-        _fontHeight / 2 + shape.verticalOffset);
-
     return boundary!;
   }
 
   @override
-  void renderNode(
-      MapCanvas canvas, Mappoint coordinatesAbsolute, Mappoint reference,
-      [double rotationRadian = 0]) {
+  void renderNode(MapCanvas canvas, Mappoint coordinatesAbsolute, Mappoint reference, [double rotationRadian = 0]) {
+    //print("paint caption: $front $back $shape");
     MapRectangle boundary = calculateBoundary();
 
-    //print("paint caption boundar: $boundary $front $back $shape");
-    RelativeMappoint relative =
-        coordinatesAbsolute.offset(-reference.x, -reference.y + shape.dy);
-    // print(
-    //     "drawing ${renderInfo.caption} with fontsize ${shapeContainer.fontSize} and width ${shapeContainer.strokeWidth}");
+    RelativeMappoint relative = coordinatesAbsolute.offset(-reference.x, -reference.y + shape.dy);
     ui.Canvas? uiCanvas = (canvas as FlutterCanvas).uiCanvas;
     if (rotationRadian != 0) {
       uiCanvas.save();
@@ -122,12 +120,8 @@ class ShapePaintCaption extends ShapePaint<ShapeCaption> {
     //     ui.Rect.fromLTWH(relative.x + boundary.left, relative.y + boundary.top,
     //         boundary.getWidth(), boundary.getHeight()),
     //     ui.Paint()..color = Colors.red.withOpacity(0.5));
-    if (back != null)
-      uiCanvas.drawParagraph(back!.paragraph,
-          ui.Offset(relative.x + boundary.left, relative.y + boundary.top));
-    if (front != null)
-      uiCanvas.drawParagraph(front!.paragraph,
-          ui.Offset(relative.x + boundary.left, relative.y + boundary.top));
+    if (back != null) uiCanvas.drawParagraph(back!.paragraph, ui.Offset(relative.x + boundary.left, relative.y + boundary.top));
+    if (front != null) uiCanvas.drawParagraph(front!.paragraph, ui.Offset(relative.x + boundary.left, relative.y + boundary.top));
     // uiCanvas.drawCircle(ui.Offset(relative.x, relative.y), 10,
     //     ui.Paint()..color = Colors.green.withOpacity(0.5));
     if (rotationRadian != 0) {
@@ -136,43 +130,29 @@ class ShapePaintCaption extends ShapePaint<ShapeCaption> {
   }
 
   @override
-  void renderWay(MapCanvas canvas, WayProperties wayProperties,
-      PixelProjection projection, Mappoint reference,
-      [double rotationRadian = 0]) {
+  void renderWay(MapCanvas canvas, WayProperties wayProperties, PixelProjection projection, Mappoint reference, [double rotationRadian = 0]) {
     MapRectangle boundary = calculateBoundary();
 
-    //print("paint caption boundar: $boundary $front $back");
-    Mappoint point = wayProperties.getCenterAbsolute(projection);
-    point = point.offsetAbsolute(0, shape.dy);
+    Mappoint relative = wayProperties.getCenterAbsolute(projection);
+    relative = relative.offsetAbsolute(-reference.x, -reference.y + shape.dy);
+    //print("paint caption boundar: $boundary $relative ${shape}");
 
-    // print(
-    //     "drawing ${renderInfo.caption} with fontsize ${shapeContainer.fontSize} and width ${shapeContainer.strokeWidth}");
-    // // uiCanvas.drawRect(
-    //     ui.Rect.fromLTWH(
-    //         this.xy.x - origin.x + boundary!.left,
-    //         this.xy.y - origin.y + boundary!.top,
-    //         front.getWidth(),
-    //         front.getHeight()),
-    //     ui.Paint()..color = Colors.red.withOpacity(0.5));
-    // uiCanvas.drawCircle(
-    //     ui.Offset(this.xy.x - origin.x + boundary!.left,
-    //         this.xy.y - origin.y + boundary!.top),
-    //     10,
-    //     ui.Paint()..color = Colors.green);
     ui.Canvas? uiCanvas = (canvas as FlutterCanvas).uiCanvas;
     if (rotationRadian != 0) {
       uiCanvas.save();
-      uiCanvas.translate(point.x, point.y);
+      uiCanvas.translate(relative.x, relative.y);
       // if the map is rotated 30° clockwise we have to paint the caption -30° (counter-clockwise) so that it is horizontal
       uiCanvas.rotate(2 * pi - rotationRadian);
-      uiCanvas.translate(-point.x, -point.y);
+      uiCanvas.translate(-relative.x, -relative.y);
     }
-    if (back != null)
-      uiCanvas.drawParagraph(back!.paragraph,
-          ui.Offset(point.x + boundary.left, point.y + boundary.top));
-    if (front != null)
-      uiCanvas.drawParagraph(front!.paragraph,
-          ui.Offset(point.x + boundary.left, point.y + boundary.top));
+
+    // uiCanvas.drawRect(
+    //     ui.Rect.fromLTWH(relative.x + boundary.left, relative.y + boundary.top,
+    //         boundary.getWidth(), boundary.getHeight()),
+    //     ui.Paint()..color = Colors.red.withOpacity(0.5));
+
+    if (back != null) uiCanvas.drawParagraph(back!.paragraph, ui.Offset(relative.x + boundary.left, relative.y + boundary.top));
+    if (front != null) uiCanvas.drawParagraph(front!.paragraph, ui.Offset(relative.x + boundary.left, relative.y + boundary.top));
     // uiCanvas.drawCircle(ui.Offset(this.xy.x - origin.x, this.xy.y - origin.y),
     //     5, ui.Paint()..color = Colors.blue);
     if (rotationRadian != 0) {

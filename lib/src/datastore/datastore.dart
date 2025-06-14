@@ -1,12 +1,14 @@
-import 'package:mapsforge_flutter/maps.dart';
 import 'package:mapsforge_flutter/src/datastore/datastorereadresult.dart';
-import 'package:mapsforge_flutter/src/model/tile.dart';
+
+import '../../core.dart';
 
 ///
 /// abstract class for a datastore
 ///
 abstract class Datastore {
   const Datastore();
+
+  void dispose();
 
   /// Reads only labels for tile. Labels are pois as well as ways that carry a name tag.
   /// It is permissible for the MapDataStore to return more data.
@@ -64,8 +66,10 @@ abstract class Datastore {
   ///
   /// @param tile tile to be rendered.
   /// @return true if tile is part of database.
-  bool supportsTile(Tile tile, Projection projection);
+  Future<bool> supportsTile(Tile tile);
 
-  /// Open file descriptors
-  Future<void> lateOpen();
+  /// Returns the area for which data is supplied.
+  ///
+  /// @return bounding box of area.
+  Future<BoundingBox> getBoundingBox();
 }

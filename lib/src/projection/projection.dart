@@ -29,6 +29,8 @@ abstract class Projection {
 
   static final double LONGITUDE_MIN = -LONGITUDE_MAX;
 
+  static final BoundingBox BOUNDINGBOX_MAX = BoundingBox(LATITUDE_MIN, LONGITUDE_MIN, LATITUDE_MAX, LONGITUDE_MAX);
+
   /// The flattening factor of the earth's ellipsoid is required for distance computation.
   static final double INVERSE_FLATTENING = 298.257223563;
 
@@ -48,6 +50,12 @@ abstract class Projection {
   /// Radian to degree
   static double radianToDeg(final double rad) => rad * (180.0 / pi);
 
+  /// Normalize an angle to the range [0, 360).
+  static double normalizeRotation(double rotation) {
+    double normalized = rotation % 360;
+    return normalized < 0 ? normalized + 360 : normalized;
+  }
+
   /// Returns a destination point based on the given [distance] and [bearing]
   ///
   /// Given a [from] (start) point, initial [bearing], and [distance],
@@ -62,8 +70,7 @@ abstract class Projection {
   ///     final p2 = distance.offset(p1, distanceInMeter, 180);
   ///
   //@override
-  static ILatLong offset(
-      final ILatLong from, final double distanceInMeter, double bearing) {
+  static ILatLong offset(final ILatLong from, final double distanceInMeter, double bearing) {
     assert(bearing >= 0 && bearing <= 360);
 // bearing: 0: north, 90: east, 180: south, 270: west
     //bearing = 90 - bearing;
@@ -73,12 +80,10 @@ abstract class Projection {
 
     final double a = distanceInMeter / EQUATORIAL_RADIUS;
 
-    final double lat2 = asin(sin(degToRadian(from.latitude)) * cos(a) +
-        cos(degToRadian(from.latitude)) * sin(a) * cos(h));
+    final double lat2 = asin(sin(degToRadian(from.latitude)) * cos(a) + cos(degToRadian(from.latitude)) * sin(a) * cos(h));
 
-    final double lng2 = degToRadian(from.longitude) +
-        atan2(sin(h) * sin(a) * cos(degToRadian(from.latitude)),
-            cos(a) - sin(degToRadian(from.latitude)) * sin(lat2));
+    final double lng2 =
+        degToRadian(from.longitude) + atan2(sin(h) * sin(a) * cos(degToRadian(from.latitude)), cos(a) - sin(degToRadian(from.latitude)) * sin(lat2));
 
     return new LatLong(radianToDeg(lat2), radianToDeg(lng2));
   }
@@ -89,31 +94,24 @@ abstract class Projection {
     double longDiff = degToRadian(p2.longitude) - degToRadian(p1.longitude);
     double cosP2Lat = cos(degToRadian(p2.latitude));
     double y = sin(longDiff) * cosP2Lat;
-    double x = cos(degToRadian(p1.latitude)) * sin(degToRadian(p2.latitude)) -
-        sin(degToRadian(p1.latitude)) * cosP2Lat * cos(longDiff);
+    double x = cos(degToRadian(p1.latitude)) * sin(degToRadian(p2.latitude)) - sin(degToRadian(p1.latitude)) * cosP2Lat * cos(longDiff);
     double c = atan2(y, x);
     double result = (c * 180 / pi + 360) % 360;
     return result;
   }
 
-  /// Calculates distance with Haversine algorithm.
+  /// Calculates distance in meters with Haversine algorithm.
   ///
   /// Accuracy can be out by 0.3%
   /// More on [Wikipedia](https://en.wikipedia.org/wiki/Haversine_formula)
   /// @return the distance in meters
   //@override
   static double distance(final ILatLong p1, final ILatLong p2) {
-    final sinDLat =
-        sin((degToRadian(p2.latitude) - degToRadian(p1.latitude)) / 2);
-    final sinDLng =
-        sin((degToRadian(p2.longitude) - degToRadian(p1.longitude)) / 2);
+    final sinDLat = sin((degToRadian(p2.latitude) - degToRadian(p1.latitude)) / 2);
+    final sinDLng = sin((degToRadian(p2.longitude) - degToRadian(p1.longitude)) / 2);
 
     // Sides
-    final a = sinDLat * sinDLat +
-        sinDLng *
-            sinDLng *
-            cos(degToRadian(p1.latitude)) *
-            cos(degToRadian(p2.latitude));
+    final a = sinDLat * sinDLat + sinDLng * sinDLng * cos(degToRadian(p1.latitude)) * cos(degToRadian(p2.latitude));
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
 
     return EQUATORIAL_RADIUS * c;
@@ -145,20 +143,11 @@ abstract class Projection {
 
     double lambda = L, lambdaP, iterLimit = 100;
 
-    double cosSqAlpha = 0,
-        sinSigma = 0,
-        cosSigma = 0,
-        cos2SigmaM = 0,
-        sigma = 0,
-        sinLambda = 0,
-        sinAlpha = 0,
-        cosLambda = 0;
+    double cosSqAlpha = 0, sinSigma = 0, cosSigma = 0, cos2SigmaM = 0, sigma = 0, sinLambda = 0, sinAlpha = 0, cosLambda = 0;
     do {
       sinLambda = sin(lambda);
       cosLambda = cos(lambda);
-      sinSigma = sqrt((cosU2 * sinLambda) * (cosU2 * sinLambda) +
-          (cosU1 * sinU2 - sinU1 * cosU2 * cosLambda) *
-              (cosU1 * sinU2 - sinU1 * cosU2 * cosLambda));
+      sinSigma = sqrt((cosU2 * sinLambda) * (cosU2 * sinLambda) + (cosU1 * sinU2 - sinU1 * cosU2 * cosLambda) * (cosU1 * sinU2 - sinU1 * cosU2 * cosLambda));
       if (sinSigma == 0) return 0; // co-incident points
       cosSigma = sinU1 * sinU2 + cosU1 * cosU2 * cosLambda;
       sigma = atan2(sinSigma, cosSigma);
@@ -171,36 +160,18 @@ abstract class Projection {
       }
       double C = f / 16 * cosSqAlpha * (4 + f * (4 - 3 * cosSqAlpha));
       lambdaP = lambda;
-      lambda = L +
-          (1 - C) *
-              f *
-              sinAlpha *
-              (sigma +
-                  C *
-                      sinSigma *
-                      (cos2SigmaM +
-                          C * cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM)));
+      lambda = L + (1 - C) * f * sinAlpha * (sigma + C * sinSigma * (cos2SigmaM + C * cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM)));
     } while ((lambda - lambdaP).abs() > 1e-12 && --iterLimit > 0);
 
     if (iterLimit == 0) return 0; // formula failed to converge
 
-    double uSq = cosSqAlpha *
-        (pow(EQUATORIAL_RADIUS, 2) - pow(POLAR_RADIUS, 2)) /
-        pow(POLAR_RADIUS, 2);
-    double A =
-        1 + uSq / 16384 * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
+    double uSq = cosSqAlpha * (pow(EQUATORIAL_RADIUS, 2) - pow(POLAR_RADIUS, 2)) / pow(POLAR_RADIUS, 2);
+    double A = 1 + uSq / 16384 * (4096 + uSq * (-768 + uSq * (320 - 175 * uSq)));
     double B = uSq / 1024 * (256 + uSq * (-128 + uSq * (74 - 47 * uSq)));
     double deltaSigma = B *
         sinSigma *
         (cos2SigmaM +
-            B /
-                4 *
-                (cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM) -
-                    B /
-                        6 *
-                        cos2SigmaM *
-                        (-3 + 4 * sinSigma * sinSigma) *
-                        (-3 + 4 * cos2SigmaM * cos2SigmaM)));
+            B / 4 * (cosSigma * (-1 + 2 * cos2SigmaM * cos2SigmaM) - B / 6 * cos2SigmaM * (-3 + 4 * sinSigma * sinSigma) * (-3 + 4 * cos2SigmaM * cos2SigmaM)));
     double s = POLAR_RADIUS * A * (sigma - deltaSigma);
 
     return s;
@@ -214,19 +185,15 @@ abstract class Projection {
   /// @param bearing  the initial bearing in degrees from north
   /// @return the destination point
   /// @see <a href="http://www.movable-type.co.uk/scripts/latlon.js">latlon.js</a>
-  static ILatLong destinationPoint(
-      ILatLong start, double distance, double bearing) {
+  static ILatLong destinationPoint(ILatLong start, double distance, double bearing) {
     double theta = degToRadian(bearing);
     double delta = distance / EQUATORIAL_RADIUS; // angular distance in radians
 
     double phi1 = degToRadian(start.latitude);
     double lambda1 = degToRadian(start.longitude);
 
-    double phi2 =
-        asin(sin(phi1) * cos(delta) + cos(phi1) * sin(delta) * cos(theta));
-    double lambda2 = lambda1 +
-        atan2(sin(theta) * sin(delta) * cos(phi1),
-            cos(delta) - sin(phi1) * sin(phi2));
+    double phi2 = asin(sin(phi1) * cos(delta) + cos(phi1) * sin(delta) * cos(theta));
+    double lambda2 = lambda1 + atan2(sin(theta) * sin(delta) * cos(phi1), cos(delta) - sin(phi1) * sin(phi2));
 
     return new LatLong(radianToDeg(phi2), radianToDeg(lambda2));
   }
@@ -249,8 +216,7 @@ abstract class Projection {
    * @return longitude degrees
    */
   static double longitudeDistance(int meters, double latitude) {
-    return (meters * 360) /
-        (2 * pi * EQUATORIAL_RADIUS * cos(degToRadian(latitude)));
+    return (meters * 360) / (2 * pi * EQUATORIAL_RADIUS * cos(degToRadian(latitude)));
   }
 
   /////////////////////////////////////////////////////////////////////////////

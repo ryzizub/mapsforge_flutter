@@ -1,4 +1,3 @@
-import 'package:mapsforge_flutter/src/rendertheme/shape/shape.dart';
 import 'package:mapsforge_flutter/src/rendertheme/shape/shape_area.dart';
 import 'package:mapsforge_flutter/src/rendertheme/shape/shape_caption.dart';
 import 'package:mapsforge_flutter/src/rendertheme/shape/shape_circle.dart';
@@ -9,7 +8,6 @@ import 'package:mapsforge_flutter/src/rendertheme/shape/shape_symbol.dart';
 
 import '../../../core.dart';
 import '../../../maps.dart';
-import '../graphics/mapcanvas.dart';
 import '../model/linestring.dart';
 import '../model/maprectangle.dart';
 import '../paintelements/shape_paint.dart';
@@ -44,8 +42,7 @@ abstract class RenderInfo<T extends Shape> implements Comparable<RenderInfo> {
 
   RenderInfo(this.shape);
 
-  void render(MapCanvas canvas, PixelProjection projection, Mappoint reference,
-      [double rotationRadian = 0]);
+  void render(MapCanvas canvas, PixelProjection projection, Mappoint reference, [double rotationRadian = 0]);
 
   MapRectangle getBoundaryAbsolute(PixelProjection projection);
 
@@ -68,76 +65,55 @@ abstract class RenderInfo<T extends Shape> implements Comparable<RenderInfo> {
     return shape.getShapeType();
   }
 
+  static int created = 0;
+
   Future<void> createShapePaint(SymbolCache symbolCache) async {
     if (shapePaint != null) return;
+    if (shape.shapePaint != null) {
+      shapePaint = shape.shapePaint! as ShapePaint<T>?;
+      return;
+    }
     switch (shape.getShapeType()) {
       case "Area":
-        if (shape.shapePaint != null) {
-          shapePaint = shape.shapePaint! as ShapePaint<T>?;
-        } else {
-          shapePaint = ShapePaintArea(shape as ShapeArea) as ShapePaint<T>;
-          await shapePaint!.init(symbolCache);
-          shape.shapePaint = shapePaint;
-        }
+        shapePaint = await ShapePaintArea.create(shape as ShapeArea, symbolCache) as ShapePaint<T>;
+        ++created;
         break;
       case "Caption":
 
         /// we need to calculate the boundary for the caption. Remember that we cannot
         /// use ui code in isolates but here we are back again from isolates so we can
         /// calculate the width/height of the caption.
-        shapePaint = ShapePaintCaption(shape as ShapeCaption, caption: caption!)
-            as ShapePaint<T>;
+        shapePaint = await ShapePaintCaption.create(shape as ShapeCaption, symbolCache, caption: caption!) as ShapePaint<T>;
+        ++created;
+        // since captions are dependent on the node/way properties we are not allowed to use this instance for other shapes, so do not assign it to shape.shapePaint
         break;
       case "Circle":
-        if (shape.shapePaint != null) {
-          shapePaint = shape.shapePaint! as ShapePaint<T>?;
-        } else {
-          shapePaint = ShapePaintCircle(shape as ShapeCircle) as ShapePaint<T>;
-          shape.shapePaint = shapePaint;
-        }
+        shapePaint = await ShapePaintCircle.create(shape as ShapeCircle, symbolCache) as ShapePaint<T>;
+        ++created;
         break;
       // case "Hillshading":
       //   shapePaint = ShapePaintHillshading(shape as ShapeHillshading) as ShapePaint<T>;
       //   break;
       case "Linesymbol":
-        if (shape.shapePaint != null) {
-          shapePaint = shape.shapePaint! as ShapePaint<T>?;
-        } else {
-          shapePaint =
-              ShapePaintLinesymbol(shape as ShapeLinesymbol) as ShapePaint<T>;
-          await shapePaint!.init(symbolCache);
-          shape.shapePaint = shapePaint;
-        }
+        shapePaint = await ShapePaintLinesymbol.create(shape as ShapeLinesymbol, symbolCache) as ShapePaint<T>;
+        ++created;
         break;
       case "Pathtext":
-        shapePaint =
-            ShapePaintPathtext(shape as ShapePathtext, caption!, stringPath!)
-                as ShapePaint<T>;
-        await shapePaint!.init(symbolCache);
+        shapePaint = await ShapePaintPathtext.create(shape as ShapePathtext, symbolCache, caption!, stringPath!) as ShapePaint<T>;
+        ++created;
+        // since captions are dependent on the node/way properties we are not allowed to use this instance for other shapes, so do not assign it to shape.shapePaint
         break;
       case "Polyline":
         // same as area but for open ways
-        if (shape.shapePaint != null) {
-          shapePaint = shape.shapePaint! as ShapePaint<T>?;
-        } else {
-          shapePaint =
-              ShapePaintPolyline(shape as ShapePolyline) as ShapePaint<T>;
-          await shapePaint!.init(symbolCache);
-          shape.shapePaint = shapePaint;
-        }
+        shapePaint = await ShapePaintPolyline.create(shape as ShapePolyline, symbolCache) as ShapePaint<T>;
+        ++created;
         break;
       case "Symbol":
-        if (shape.shapePaint != null) {
-          shapePaint = shape.shapePaint! as ShapePaint<T>?;
-        } else {
-          shapePaint = ShapePaintSymbol(shape as ShapeSymbol) as ShapePaint<T>;
-          await shapePaint!.init(symbolCache);
-          shape.shapePaint = shapePaint;
-        }
+        shapePaint = await ShapePaintSymbol.create(shape as ShapeSymbol, symbolCache) as ShapePaint<T>;
+        ++created;
         break;
       default:
-        print(
-            "cannot find ShapePaint for ${shape.getShapeType()} of type ${shape.runtimeType}");
+        print("cannot find ShapePaint for ${shape.getShapeType()} of type ${shape.runtimeType}");
     }
   }
 

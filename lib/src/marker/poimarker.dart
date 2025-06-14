@@ -7,7 +7,6 @@ import 'package:mapsforge_flutter/src/model/maprectangle.dart';
 import '../../datastore.dart';
 import '../../maps.dart';
 import '../paintelements/shape_paint_symbol.dart';
-import '../rendertheme/nodeproperties.dart';
 import '../rendertheme/shape/shape_symbol.dart';
 
 class PoiMarker<T> extends BasicPointMarker<T> with CaptionMixin {
@@ -41,7 +40,6 @@ class PoiMarker<T> extends BasicPointMarker<T> with CaptionMixin {
     required DisplayModel displayModel,
     this.position = Position.CENTER,
     this.rotateWithMap = true,
-    @Deprecated("use addCaption() instead") Caption? caption,
   })  : assert(minZoomLevel >= 0),
         assert(maxZoomLevel <= 65535),
         assert(rotation >= 0 && rotation <= 360),
@@ -64,7 +62,8 @@ class PoiMarker<T> extends BasicPointMarker<T> with CaptionMixin {
     base.setBitmapWidth(width.round());
     base.setBitmapHeight(height.round());
     base.position = position;
-    if (caption != null) addCaption(caption);
+    base.id = "poi";
+    symbolFinder.add("poi", base);
   }
 
   @override
@@ -75,9 +74,9 @@ class PoiMarker<T> extends BasicPointMarker<T> with CaptionMixin {
 
   Future<void> initResources(SymbolCache symbolCache) async {
     if (scaled == null) {
-      scaled = ShapeSymbol.scale(base, 0);
+      scaled = ShapeSymbol.scale(base, 0, symbolFinder);
       _lastZoom = 0;
-      shapePaint = ShapePaintSymbol(scaled!);
+      shapePaint = await ShapePaintSymbol.create(scaled!, symbolCache);
       await shapePaint.init(symbolCache);
     }
   }
@@ -91,8 +90,7 @@ class PoiMarker<T> extends BasicPointMarker<T> with CaptionMixin {
     base.setBitmapColorFromNumber(color);
   }
 
-  Future<void> setAndLoadBitmapSrc(
-      String bitmapSrc, SymbolCache symbolCache) async {
+  Future<void> setAndLoadBitmapSrc(String bitmapSrc, SymbolCache symbolCache) async {
     base.bitmapSrc = bitmapSrc;
     scaled = null;
     await initResources(symbolCache);
@@ -107,8 +105,7 @@ class PoiMarker<T> extends BasicPointMarker<T> with CaptionMixin {
     renderMarker(
         flutterCanvas: flutterCanvas,
         markerContext: markerContext,
-        coordinatesAbsolute:
-            nodeProperties.getCoordinatesAbsolute(markerContext.projection),
+        coordinatesAbsolute: nodeProperties.getCoordinatesAbsolute(markerContext.projection),
         symbolBoundary: getSymbolBoundary());
   }
 
@@ -144,8 +141,7 @@ class PoiMarker<T> extends BasicPointMarker<T> with CaptionMixin {
       nodeProperties.clearCache();
     }
     _lastZoomLevel = tapEvent.projection.scalefactor.zoomlevel;
-    Mappoint absolute =
-        nodeProperties.getCoordinatesAbsolute(tapEvent.projection);
+    Mappoint absolute = nodeProperties.getCoordinatesAbsolute(tapEvent.projection);
     Mappoint tapped = tapEvent.projection.latLonToPixel(tapEvent);
     MapRectangle boundary = base.calculateBoundary();
     bool tpd = tapped.x >= absolute.x + boundary.left &&

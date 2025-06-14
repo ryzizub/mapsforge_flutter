@@ -27,6 +27,14 @@ class Tag implements Comparable<Tag> {
       : key = tag.substring(0, tag.indexOf(KEY_VALUE_SEPARATOR)),
         value = tag.substring(tag.indexOf(KEY_VALUE_SEPARATOR) + 1);
 
+  static List<Tag> from(Map<String, String> tags) {
+    List<Tag> list = [];
+    tags.forEach((key, value) {
+      list.add(Tag(key, value));
+    });
+    return list;
+  }
+
   /**
    * Compares this tag to the specified tag.
    * The tag comparison is based on a comparison of key and value in that order.
@@ -46,12 +54,7 @@ class Tag implements Comparable<Tag> {
   }
 
   @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Tag &&
-          runtimeType == other.runtimeType &&
-          key == other.key &&
-          value == other.value;
+  bool operator ==(Object other) => identical(this, other) || other is Tag && runtimeType == other.runtimeType && key == other.key && value == other.value;
 
   @override
   int get hashCode => key.hashCode ^ value.hashCode;
@@ -59,5 +62,15 @@ class Tag implements Comparable<Tag> {
   @override
   String toString() {
     return 'Tag{key: $key, value: $value}';
+  }
+
+  static String tagsWithoutNames(List<Tag> tags) {
+    String result = '';
+    tags.forEach((tag) {
+      if (tag.key!.startsWith("name:") || tag.key!.startsWith("official_name") || tag.key!.startsWith("alt_name") || tag.key!.startsWith("int_name")) return;
+      if (result.isNotEmpty) result += ",";
+      result += "${tag.key}=${tag.value}";
+    });
+    return result;
   }
 }

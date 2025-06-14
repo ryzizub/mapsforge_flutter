@@ -19,6 +19,8 @@ class PixelProjection extends MercatorProjection {
   ///
   late int _mapSize;
 
+  static final Map<String, double> _pixelDiffCache = {};
+
   PixelProjection(int zoomLevel)
       : tileSize = MapsforgeConstants().tileSize,
         super.fromZoomlevel(zoomLevel) {
@@ -62,8 +64,7 @@ class PixelProjection extends MercatorProjection {
     const double pi4 = 4 * pi;
     double sinLatitude = sin(latitude * pi180);
 // FIXME improve this formula so that it works correctly without the clipping
-    double pixelY =
-        (0.5 - log((1 + sinLatitude) / (1 - sinLatitude)) / pi4) * _mapSize;
+    double pixelY = (0.5 - log((1 + sinLatitude) / (1 - sinLatitude)) / pi4) * _mapSize;
     return min(max(0, pixelY), _mapSize.toDouble());
   }
 
@@ -110,14 +111,25 @@ class PixelProjection extends MercatorProjection {
     return 360 * ((pixelX / _mapSize) - 0.5);
   }
 
+  double latitudeDiffPerPixel(double latitude, double pixelDiff) {
+    String key = "${latitude.round()}_$pixelDiff";
+    double? result = _pixelDiffCache[key];
+    if (result == null) {
+      double pixelY = latitudeToPixelY(latitude);
+      double latitude2 = pixelYToLatitude(pixelY - pixelDiff);
+      result = (latitude2 - latitude).abs();
+      _pixelDiffCache[key] = result;
+    }
+    return result;
+  }
+
   /// Calculates the absolute pixel position for a map size and tile size
   ///
   /// @param latLong the geographic position.
   /// @param mapSize precomputed size of map.
   /// @return the absolute pixel coordinates (for world)
   Mappoint latLonToPixel(ILatLong latLong) {
-    return Mappoint(longitudeToPixelX(latLong.longitude),
-        latitudeToPixelY(latLong.latitude));
+    return Mappoint(longitudeToPixelX(latLong.longitude), latitudeToPixelY(latLong.latitude));
   }
 
   /// Calculates the absolute pixel position for a tile and tile size relative to origin
@@ -136,8 +148,7 @@ class PixelProjection extends MercatorProjection {
   /// @param latLong the geographic position.
   /// @param tile    tile
   /// @return the relative pixel position to the origin values (e.g. for a tile)
-  RelativeMappoint pixelRelativeToLeftUpper(
-      ILatLong latLong, Mappoint leftUpper) {
+  RelativeMappoint pixelRelativeToLeftUpper(ILatLong latLong, Mappoint leftUpper) {
     Mappoint mappoint = latLonToPixel(latLong);
     return mappoint.offset(-leftUpper.x, -leftUpper.y);
   }
@@ -165,9 +176,7 @@ class PixelProjection extends MercatorProjection {
     if (latLong.latitude == 90 || latLong.latitude == -90) return 0;
     int pixels = _mapSizeWithScaleFactor();
     const double pi180 = pi / 180;
-    return Projection.EARTH_CIRCUMFERENCE /
-        pixels *
-        cos(latLong.latitude * pi180);
+    return Projection.EARTH_CIRCUMFERENCE / pixels * cos(latLong.latitude * pi180);
   }
 
   ///
@@ -175,6 +184,11 @@ class PixelProjection extends MercatorProjection {
   /// the _mapSize is equal to the tileSize.
   ///
   int get mapsize => _mapSize;
+
+  MapRectangle boundingBoxToRectangle(BoundingBox boundingBox) {
+    return MapRectangle(longitudeToPixelX(boundingBox.minLongitude), latitudeToPixelY(boundingBox.minLatitude), longitudeToPixelX(boundingBox.maxLongitude),
+        latitudeToPixelY(boundingBox.maxLatitude));
+  }
 
   @override
   String toString() {
@@ -185,18 +199,13 @@ class PixelProjection extends MercatorProjection {
   /// This is an expensive operations since we probe each zoomLevel until we find the correct one.
   /// Use it sparingly.
   static int calculateFittingZoomlevel(BoundingBox boundary, Size size) {
-    for (int zoomLevel = Scalefactor.MAXZOOMLEVEL;
-        zoomLevel >= 0;
-        --zoomLevel) {
+    for (int zoomLevel = Scalefactor.MAXZOOMLEVEL; zoomLevel >= 0; --zoomLevel) {
       PixelProjection projection = PixelProjection(zoomLevel);
-      Mappoint leftUpper = projection
-          .latLonToPixel(LatLong(boundary.maxLatitude, boundary.minLongitude));
-      Mappoint rightBottom = projection
-          .latLonToPixel(LatLong(boundary.minLatitude, boundary.maxLongitude));
+      Mappoint leftUpper = projection.latLonToPixel(LatLong(boundary.maxLatitude, boundary.minLongitude));
+      Mappoint rightBottom = projection.latLonToPixel(LatLong(boundary.minLatitude, boundary.maxLongitude));
       assert(leftUpper.x < rightBottom.x);
       assert(leftUpper.y < rightBottom.y);
-      if ((rightBottom.x - leftUpper.x) <= size.width &&
-          (rightBottom.y - leftUpper.y) <= size.height) {
+      if ((rightBottom.x - leftUpper.x) <= size.width && (rightBottom.y - leftUpper.y) <= size.height) {
         return zoomLevel;
       }
     }

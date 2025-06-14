@@ -33,12 +33,17 @@ class Tile {
 
   /// @return the maximum valid tile number for the given zoom level, 2<sup>zoomLevel</sup> -1.
   static int getMaxTileNumber(int zoomLevel) {
-    if (zoomLevel < 0) {
-      throw new Exception("zoomLevel must not be negative: $zoomLevel");
-    } else if (zoomLevel == 0) {
-      return 0;
+    assert(zoomLevel >= 0, "zoomLevel must not be negative: $zoomLevel");
+    switch (zoomLevel) {
+      case 0:
+        return 0;
+      case 1:
+        return 1;
+      case 2:
+        return 3;
+      default:
+        return (1 << zoomLevel) - 1;
     }
-    return (2 << zoomLevel - 1) - 1;
   }
 
   /// @param tileX     the X number of the tile.
@@ -46,17 +51,11 @@ class Tile {
   /// @param zoomLevel the zoom level of the tile.
   /// @throws IllegalArgumentException if any of the parameters is invalid.
   Tile(this.tileX, this.tileY, this.zoomLevel, this.indoorLevel)
-      : assert(tileX >= 0),
-        assert(tileY >= 0),
+      : assert(tileX >= 0, "tileX $tileX must not be negative"),
+        assert(tileY >= 0, "tileY $tileY must not be negative"),
         assert(zoomLevel >= 0) {
-    int maxTileNumber = getMaxTileNumber(zoomLevel);
-    if (tileX > maxTileNumber) {
-      throw new Exception(
-          "invalid tileX number on zoom level $zoomLevel: $tileX");
-    } else if (tileY > maxTileNumber) {
-      throw new Exception(
-          "invalid tileY number on zoom level $zoomLevel: $tileY (max is $maxTileNumber)");
-    }
+    assert(tileX <= getMaxTileNumber(zoomLevel), "$tileX > ${getMaxTileNumber(zoomLevel)} for zoomlevel $zoomLevel");
+    assert(tileY <= getMaxTileNumber(zoomLevel), "$tileY > ${getMaxTileNumber(zoomLevel)} for zoomlevel $zoomLevel");
   }
 
   void dispose() {}
@@ -72,11 +71,7 @@ class Tile {
           indoorLevel == other.indoorLevel;
 
   @override
-  int get hashCode =>
-      tileX.hashCode ^
-      tileY.hashCode ^
-      zoomLevel.hashCode ^
-      indoorLevel.hashCode << 5;
+  int get hashCode => tileX.hashCode ^ tileY.hashCode ^ zoomLevel.hashCode ^ indoorLevel.hashCode << 5;
 
   /// Returns a set of the eight neighbours of this tile.
   ///
@@ -221,8 +216,45 @@ class Tile {
       return null;
     }
 
-    return Tile((this.tileX / 2).round(), (this.tileY / 2).round(),
-        (this.zoomLevel - 1), this.indoorLevel);
+    return Tile((this.tileX / 2).floor(), (this.tileY / 2).floor(), (this.zoomLevel - 1), this.indoorLevel);
+  }
+
+  /// Returns the childs of this tile. The first two items are the upper row from left to right, the next two items are the lower row.
+  List<Tile> getChilds() {
+    int x = tileX * 2;
+    int y = tileY * 2;
+    List<Tile> childs = [];
+    childs.add(Tile(x, y, zoomLevel + 1, indoorLevel));
+    childs.add(Tile(x + 1, y, zoomLevel + 1, indoorLevel));
+    childs.add(Tile(x, y + 1, zoomLevel + 1, indoorLevel));
+    childs.add(Tile(x + 1, y + 1, zoomLevel + 1, indoorLevel));
+    return childs;
+  }
+
+  /// Returns the grandchild-tiles. The tiles are ordered by row, then column
+  /// meaning the first 4 tiles are the upper row from left to right.
+  List<Tile> getGrandchilds() {
+    List<Tile> childs = getChilds();
+    List<Tile> result = [];
+    for (int i = 0; i < 2; ++i) {
+      List<Tile> result0 = [];
+      List<Tile> result1 = [];
+      List<Tile> grand = childs[i * 2].getChilds();
+      result0.add(grand[0]);
+      result0.add(grand[1]);
+      result1.add(grand[2]);
+      result1.add(grand[3]);
+      grand = childs[i * 2 + 1].getChilds();
+      result0.add(grand[0]);
+      result0.add(grand[1]);
+      result1.add(grand[2]);
+      result1.add(grand[3]);
+
+      result.addAll(result0);
+      result.addAll(result1);
+    }
+    assert(result.length == 16);
+    return result;
   }
 
   int getShiftX(Tile otherTile) {
@@ -241,35 +273,30 @@ class Tile {
     return this.tileY % 2 + 2 * getParent()!.getShiftY(otherTile);
   }
 
-  BoundingBox getBoundingBox(Projection projection) {
+  BoundingBox getBoundingBox() {
     if (_boundary != null) return _boundary!;
+    Projection projection = MercatorProjection.fromZoomlevel(zoomLevel);
     _boundary = projection.boundingBoxOfTile(this);
     return _boundary!;
   }
 
   Mappoint getLeftUpper() {
     if (_leftUpper != null) return _leftUpper!;
-    _leftUpper = Mappoint(
-        (tileX * MapsforgeConstants().tileSize), (tileY * MapsforgeConstants().tileSize));
+    _leftUpper = Mappoint((tileX * MapsforgeConstants().tileSize), (tileY * MapsforgeConstants().tileSize));
     return _leftUpper!;
   }
 
   Mappoint getCenter() {
     if (_center != null) return _center!;
     double tileSize = MapsforgeConstants().tileSize;
-    _center = Mappoint(
-        (tileX * tileSize + tileSize / 2).toDouble(), (tileY * tileSize + tileSize / 2).toDouble());
+    _center = Mappoint((tileX * tileSize + tileSize / 2).toDouble(), (tileY * tileSize + tileSize / 2).toDouble());
     return _center!;
   }
 
   MapRectangle getMapBoundary() {
     if (_mapBoundary != null) return _mapBoundary!;
     double tileSize = MapsforgeConstants().tileSize;
-    _mapBoundary = MapRectangle(
-        (tileX * tileSize),
-        (tileY * tileSize),
-        (tileX * tileSize + tileSize),
-        (tileY * tileSize + tileSize));
+    _mapBoundary = MapRectangle((tileX * tileSize), (tileY * tileSize), (tileX * tileSize + tileSize), (tileY * tileSize + tileSize));
     return _mapBoundary!;
   }
 

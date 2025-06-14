@@ -1,28 +1,169 @@
 import 'dart:typed_data';
 
+import 'package:ecache/ecache.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:isolate_task_queue/isolate_task_queue.dart';
 import 'package:logging/logging.dart';
 import 'package:mapsforge_flutter/core.dart';
-import 'package:mapsforge_flutter/src/mapfile/mapfilehelper.dart';
-import 'package:mapsforge_flutter/src/mapfile/mapfileinfo.dart';
+import 'package:mapsforge_flutter/src/mapfile/map_header_info.dart';
+import 'package:mapsforge_flutter/src/mapfile/mapfile_helper.dart';
+import 'package:mapsforge_flutter/src/mapfile/mapfile_info_builder.dart';
 import 'package:mapsforge_flutter/src/mapfile/readbuffer.dart';
 import 'package:mapsforge_flutter/src/mapfile/readbufferfile.dart';
 import 'package:mapsforge_flutter/src/mapfile/readbuffermemory.dart';
 import 'package:mapsforge_flutter/src/mapfile/readbuffersource.dart';
 import 'package:mapsforge_flutter/src/mapfile/subfileparameter.dart';
+import 'package:mapsforge_flutter/src/model/zoomlevel_range.dart';
 import 'package:mapsforge_flutter/src/parameters.dart';
 import 'package:mapsforge_flutter/src/projection/projection.dart';
 
-import '../datastore/datastorereadresult.dart';
-import '../datastore/mapdatastore.dart';
-import '../datastore/pointofinterest.dart';
+import '../../datastore.dart';
 import '../datastore/poiwaybundle.dart';
-import '../datastore/way.dart';
 import '../projection/mercatorprojection.dart';
 import '../reader/queryparameters.dart';
 import '../utils/timing.dart';
 import 'indexcache.dart';
-import 'mapfileheader.dart';
+import 'mapfile_info.dart';
+
+@pragma("vm:entry-point")
+class IsolateMapfile implements Datastore {
+  /// The instance of the mapfile in the isolate
+  static MapFile? mapFile;
+
+  /// The parameter needed to create a mapfile in the isolate
+  static late final String filename;
+
+  static late final String? preferredLanguage;
+
+  /// a long-running instance of an isolate
+  late final FlutterIsolateInstance _isolateInstance;
+
+  IsolateMapfile._();
+
+  static Future<IsolateMapfile> create(String filename, [String? preferredLanguage]) async {
+    IsolateMapfile _instance = IsolateMapfile._();
+    _instance._isolateInstance = await FlutterIsolateInstance.createInstance(
+        createInstance: _createInstanceStatic, instanceParams: _MapfileInstanceRequest(filename, preferredLanguage));
+    return _instance;
+  }
+
+  @override
+  void dispose() {
+    _isolateInstance.dispose();
+  }
+
+  @pragma('vm:entry-point')
+  static void _createInstanceStatic(Object request) {
+    filename = (request as _MapfileInstanceRequest).filename;
+    preferredLanguage = request.preferredLanguage;
+  }
+
+  @override
+  Future<DatastoreReadResult?> readLabels(Tile upperLeft, Tile lowerRight) {
+    // TODO: implement readLabels
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<DatastoreReadResult?> readLabelsSingle(Tile tile) async {
+    DatastoreReadResult? result = await _isolateInstance.compute(_readLabelsSingleStatic, _MapfileReadSingleRequest(tile));
+    return result;
+  }
+
+  @pragma('vm:entry-point')
+  static Future<DatastoreReadResult?> _readLabelsSingleStatic(_MapfileReadSingleRequest request) async {
+    mapFile ??= await MapFile.from(filename, 0, preferredLanguage);
+    return mapFile!.readLabelsSingle(request.tile);
+  }
+
+  @override
+  Future<DatastoreReadResult> readMapData(Tile upperLeft, Tile lowerRight) {
+    // TODO: implement readMapData
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<DatastoreReadResult?> readMapDataSingle(Tile tile) async {
+    DatastoreReadResult? result = await _isolateInstance.compute(_readMapDataSingleStatic, _MapfileReadSingleRequest(tile));
+    return result;
+  }
+
+  @pragma('vm:entry-point')
+  static Future<DatastoreReadResult?> _readMapDataSingleStatic(_MapfileReadSingleRequest request) async {
+    mapFile ??= await MapFile.from(filename, 0, preferredLanguage);
+    return mapFile!.readMapDataSingle(request.tile);
+  }
+
+  @override
+  Future<DatastoreReadResult?> readPoiData(Tile upperLeft, Tile lowerRight) {
+    // TODO: implement readPoiData
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<DatastoreReadResult?> readPoiDataSingle(Tile tile) {
+    // TODO: implement readPoiDataSingle
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<bool> supportsTile(Tile tile) async {
+    bool result = await _isolateInstance.compute(_supportsTileStatic, _MapfileSupportsTileRequest(tile));
+    return result;
+  }
+
+  @pragma('vm:entry-point')
+  static Future<bool> _supportsTileStatic(_MapfileSupportsTileRequest request) async {
+    mapFile ??= await MapFile.from(filename, 0, preferredLanguage);
+    return mapFile!.supportsTile(request.tile);
+  }
+
+  @override
+  Future<BoundingBox> getBoundingBox() async {
+    BoundingBox result = await _isolateInstance.compute(_getBoundingBoxStatic, _MapfileBoundingBoxRequest());
+    return result;
+  }
+
+  @pragma('vm:entry-point')
+  static Future<BoundingBox> _getBoundingBoxStatic(_MapfileBoundingBoxRequest request) async {
+    mapFile ??= await MapFile.from(filename, 0, preferredLanguage);
+    return mapFile!.getBoundingBox();
+  }
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+class _MapfileInstanceRequest {
+  final String filename;
+
+  final String? preferredLanguage;
+
+  _MapfileInstanceRequest(this.filename, this.preferredLanguage);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+class _MapfileBoundingBoxRequest {
+  _MapfileBoundingBoxRequest();
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+class _MapfileReadSingleRequest {
+  final Tile tile;
+
+  _MapfileReadSingleRequest(this.tile);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+class _MapfileSupportsTileRequest {
+  final Tile tile;
+
+  _MapfileSupportsTileRequest(this.tile);
+}
+
+//////////////////////////////////////////////////////////////////////////////
 
 /// A class for reading binary map files.
 /// The mapFile should be disposed if not needed anymore
@@ -62,35 +203,29 @@ class MapFile extends MapDataStore {
 
   late final IndexCache _databaseIndexCache;
 
-  int _fileSize = 0;
+  int _fileSize = -1;
 
-  late final MapFileHeader _mapFileHeader;
   final int? timestamp;
 
-  int zoomLevelMin = 0;
-  int zoomLevelMax = 30;
+  ZoomlevelRange zoomlevelRange = const ZoomlevelRange.standard();
+
+  late final MapfileInfo _mapFileInfo;
 
   late final MapfileHelper _helper;
 
-  /// just to see if we should create a cache for blocks
-  //final Set<int> _blockSet = Set();
+  final TaskQueue _queue = SimpleTaskQueue();
 
-  // final StatisticsStorage<String, PoiWayBundle> _storage =
-  //     StatisticsStorage<String, PoiWayBundle>();
-  //
-  // late LruCache<String, PoiWayBundle> _blockCache;
+  late final ReadbufferSource readBufferSource;
 
-  ReadbufferSource? readBufferSource;
+  Cache<String, Readbuffer> _cache = LfuCache(storage: StatisticsStorage(), capacity: 100);
 
-  static Future<MapFile> from(String filename, int? timestamp, String? language,
-      {ReadbufferSource? source}) async {
+  static Future<MapFile> from(String filename, int? timestamp, String? language, {ReadbufferSource? source}) async {
     MapFile mapFile = MapFile._(timestamp, language);
     await mapFile._init(source != null ? source : ReadbufferFile(filename));
     return mapFile;
   }
 
-  static Future<MapFile> using(
-      Uint8List content, int? timestamp, String? language) async {
+  static Future<MapFile> using(Uint8List content, int? timestamp, String? language) async {
     assert(content.length > 0);
     MapFile mapFile = MapFile._(timestamp, language);
     await mapFile._initContent(content);
@@ -102,44 +237,30 @@ class MapFile extends MapDataStore {
   /// @param filename the filename of the mapfile.
   /// @param language       the language to use (may be null).
   /// @throws MapFileException if the given map file channel is null or invalid.
-  MapFile._(this.timestamp, String? language) : super(language);
+  MapFile._(this.timestamp, String? language) : super((language?.trim().toLowerCase().isEmpty ?? true) ? null : language?.trim().toLowerCase());
 
   Future<MapFile> _init(ReadbufferSource source) async {
     _databaseIndexCache = new IndexCache(INDEX_CACHE_SIZE);
     this.readBufferSource = source;
-    _mapFileHeader = MapFileHeader();
-    // we will send this structure to the isolate later on. Unfortunately we cannot send the io library status to the isolate so we need to close and nullify it for now.
-    // readBufferSource!.close();
-    // readBufferSource = null;
-    _helper = MapfileHelper(_mapFileHeader, preferredLanguage);
-    //await lateOpen();
     return this;
   }
 
   Future<MapFile> _initContent(Uint8List content) async {
     _databaseIndexCache = new IndexCache(INDEX_CACHE_SIZE);
     this.readBufferSource = ReadbufferMemory(content);
-    _mapFileHeader = MapFileHeader();
-    // we will send this structure to the isolate later on. Unfortunately we cannot send the io library status to the isolate so we need to close and nullify it for now.
-    _helper = MapfileHelper(_mapFileHeader, preferredLanguage);
     return this;
   }
 
   @override
   String toString() {
-    return 'MapFile{_fileSize: $_fileSize, _mapFileHeader: $_mapFileHeader, timestamp: $timestamp, zoomLevelMin: $zoomLevelMin, zoomLevelMax: $zoomLevelMax, readBufferSource: $readBufferSource}';
-  }
-
-  @mustCallSuper
-  void dispose() {
-    this._databaseIndexCache.dispose();
-    readBufferSource?.close();
-    readBufferSource = null;
+    return 'MapFile{_fileSize: $_fileSize, _mapFileHeader: $_mapFileInfo, timestamp: $timestamp, zoomlevelRange: $zoomlevelRange, readBufferSource: $readBufferSource}';
   }
 
   @override
-  BoundingBox get boundingBox {
-    return getMapFileInfo().boundingBox;
+  @mustCallSuper
+  void dispose() {
+    this._databaseIndexCache.dispose();
+    readBufferSource.dispose();
   }
 
   /**
@@ -149,51 +270,44 @@ class MapFile extends MapDataStore {
    * @return the creation timestamp inside the map file.
    */
   @override
-  int? getDataTimestamp(Tile tile) {
-    return this.timestamp;
+  Future<int?> getDataTimestamp(Tile tile) {
+    return Future.value(this.timestamp);
   }
 
   /**
    * @return the header data for the current map file.
    */
-  MapFileHeader getMapFileHeader() {
-    return this._mapFileHeader;
+  MapfileInfo getMapFileInfo() {
+    return this._mapFileInfo;
   }
 
   /**
    * @return the metadata for the current map file. Make sure [lateOpen] is
    * already executed
    */
-  MapFileInfo getMapFileInfo() {
-    return this._mapFileHeader.getMapFileInfo();
+  MapHeaderInfo getMapHeaderInfo() {
+    return this._mapFileInfo.getMapHeaderInfo();
   }
 
   /**
    * @return the map file supported languages (may be null).
    */
   List<String>? getMapLanguages() {
-    String? languagesPreference = getMapFileInfo().languagesPreference;
+    String? languagesPreference = getMapHeaderInfo().languagesPreference;
     if (languagesPreference != null && languagesPreference.trim().isNotEmpty) {
       return languagesPreference.split(",");
     }
     return null;
   }
 
-  PoiWayBundle _processBlock(
-      QueryParameters queryParameters,
-      SubFileParameter subFileParameter,
-      BoundingBox boundingBox,
-      double tileLatitude,
-      double tileLongitude,
-      MapfileSelector selector,
-      Readbuffer readBuffer) {
+  PoiWayBundle _processBlock(QueryParameters queryParameters, SubFileParameter subFileParameter, BoundingBox boundingBox, double tileLatitude,
+      double tileLongitude, MapfileSelector selector, Readbuffer readBuffer) {
     if (!_processBlockSignature(readBuffer)) {
       throw Exception("ProcessblockSignature mismatch");
     }
 
     List<List<int>> zoomTable = _readZoomTable(subFileParameter, readBuffer);
-    int zoomTableRow =
-        queryParameters.queryZoomLevel - subFileParameter.zoomLevelMin;
+    int zoomTableRow = queryParameters.queryZoomLevel - subFileParameter.zoomLevelMin;
     int poisOnQueryZoomLevel = zoomTable[zoomTableRow][0];
     int waysOnQueryZoomLevel = zoomTable[zoomTableRow][1];
 
@@ -204,29 +318,21 @@ class MapFile extends MapDataStore {
     }
 
     // add the current buffer position to the relative first way offset
-    firstWayOffset += readBuffer.bufferPosition;
+    firstWayOffset += readBuffer.getBufferPosition();
     if (firstWayOffset > readBuffer.getBufferSize()) {
       throw Exception(INVALID_FIRST_WAY_OFFSET + "$firstWayOffset");
     }
 
-    bool filterRequired =
-        queryParameters.queryZoomLevel > subFileParameter.baseZoomLevel;
+    bool filterRequired = queryParameters.queryZoomLevel > subFileParameter.baseZoomLevel;
 
-    List<PointOfInterest> pois = _helper.processPOIs(
-        tileLatitude,
-        tileLongitude,
-        poisOnQueryZoomLevel,
-        boundingBox,
-        filterRequired,
-        readBuffer);
+    List<PointOfInterest> pois = _helper.processPOIs(tileLatitude, tileLongitude, poisOnQueryZoomLevel, boundingBox, filterRequired, readBuffer, this);
 
     List<Way>? ways;
     if (MapfileSelector.POIS == selector) {
       ways = [];
     } else {
       // finished reading POIs, check if the current buffer position is valid
-      assert(readBuffer.getBufferPosition() <= firstWayOffset,
-          "invalid buffer position: ${readBuffer.getBufferPosition()}");
+      assert(readBuffer.getBufferPosition() <= firstWayOffset, "invalid buffer position: ${readBuffer.getBufferPosition()}");
       if (firstWayOffset == readBuffer.getBufferSize()) {
         // no ways in this block
         ways = [];
@@ -234,31 +340,20 @@ class MapFile extends MapDataStore {
         // move the pointer to the first way
         readBuffer.setBufferPosition(firstWayOffset);
 
-        ways = _helper.processWays(
-            queryParameters,
-            waysOnQueryZoomLevel,
-            boundingBox,
-            filterRequired,
-            tileLatitude,
-            tileLongitude,
-            selector,
-            readBuffer);
+        ways = _helper.processWays(queryParameters, waysOnQueryZoomLevel, boundingBox, filterRequired, tileLatitude, tileLongitude, selector, readBuffer, this);
       }
     }
 
     return new PoiWayBundle(pois, ways);
   }
 
-  /**
-   * Processes the block signature, if present.
-   *
-   * @return true if the block signature could be processed successfully, false otherwise.
-   */
+  /// Processes the block signature, if present.
+  ///
+  /// @return true if the block signature could be processed successfully, false otherwise.
   bool _processBlockSignature(Readbuffer readBuffer) {
-    if (this._mapFileHeader.getMapFileInfo().debugFile) {
+    if (this._mapFileInfo.getMapHeaderInfo().debugFile) {
       // get and check the block signature
-      String signatureBlock =
-          readBuffer.readUTF8EncodedString2(SIGNATURE_LENGTH_BLOCK);
+      String signatureBlock = readBuffer.readUTF8EncodedString2(SIGNATURE_LENGTH_BLOCK);
       if (!signatureBlock.startsWith("###TileStart")) {
         _log.warning("invalid block signature: " + signatureBlock);
         return false;
@@ -270,27 +365,16 @@ class MapFile extends MapDataStore {
   ///
   /// don't make this method private since we are using it in the example APP to analyze mapfiles
   ///
-  Future<DatastoreReadResult> processBlocks(
-      ReadbufferSource readBufferSource,
-      QueryParameters queryParameters,
-      SubFileParameter subFileParameter,
-      BoundingBox boundingBox,
-      MapfileSelector selector) async {
+  Future<DatastoreReadResult> processBlocks(ReadbufferSource readBufferSource, QueryParameters queryParameters, SubFileParameter subFileParameter,
+      BoundingBox boundingBox, MapfileSelector selector) async {
     bool queryIsWater = true;
     bool queryReadWaterInfo = false;
-    Projection projection =
-        MercatorProjection.fromZoomlevel(subFileParameter.baseZoomLevel);
 
-    DatastoreReadResult mapFileReadResult =
-        new DatastoreReadResult(pointOfInterests: [], ways: []);
+    DatastoreReadResult mapFileReadResult = new DatastoreReadResult(pointOfInterests: [], ways: []);
 
     // read and process all blocks from top to bottom and from left to right
-    for (int row = queryParameters.fromBlockY;
-        row <= queryParameters.toBlockY;
-        ++row) {
-      for (int column = queryParameters.fromBlockX;
-          column <= queryParameters.toBlockX;
-          ++column) {
+    for (int row = queryParameters.fromBlockY; row <= queryParameters.toBlockY; ++row) {
+      for (int column = queryParameters.fromBlockX; column <= queryParameters.toBlockX; ++column) {
         // calculate the actual block number of the needed block in the file
         int blockNumber = row * subFileParameter.blocksWidth + column;
         // String cacheKey = "$blockNumber-${queryParameters.queryZoomLevel}";
@@ -303,9 +387,7 @@ class MapFile extends MapDataStore {
         // }
 
         // get the current index entry
-        int currentBlockIndexEntry = await this
-            ._databaseIndexCache
-            .getIndexEntry(subFileParameter, blockNumber, readBufferSource);
+        int currentBlockIndexEntry = await this._databaseIndexCache.getIndexEntry(subFileParameter, blockNumber, readBufferSource);
 
         // check if the current query would still return a water tile
         if (queryIsWater) {
@@ -316,10 +398,9 @@ class MapFile extends MapDataStore {
 
         // get and check the current block pointer
         int currentBlockPointer = currentBlockIndexEntry & BITMASK_INDEX_OFFSET;
-        if (currentBlockPointer < 1 ||
-            currentBlockPointer > subFileParameter.subFileSize!) {
-          _log.warning("invalid current block pointer: $currentBlockPointer");
-          _log.warning("subFileSize: ${subFileParameter.subFileSize}");
+        if (currentBlockPointer < 1 || currentBlockPointer > subFileParameter.subFileSize) {
+          _log.warning(
+              "invalid current block pointer: 0x${currentBlockPointer.toRadixString(16)} with subFileSize: 0x${subFileParameter.subFileSize.toRadixString(16)} for blocknumber $blockNumber");
           return mapFileReadResult;
         }
 
@@ -330,10 +411,8 @@ class MapFile extends MapDataStore {
           nextBlockPointer = subFileParameter.subFileSize;
         } else {
           // get and check the next block pointer
-          nextBlockPointer = (await this._databaseIndexCache.getIndexEntry(
-                  subFileParameter, blockNumber + 1, readBufferSource)) &
-              BITMASK_INDEX_OFFSET;
-          if (nextBlockPointer > subFileParameter.subFileSize!) {
+          nextBlockPointer = (await this._databaseIndexCache.getIndexEntry(subFileParameter, blockNumber + 1, readBufferSource)) & BITMASK_INDEX_OFFSET;
+          if (nextBlockPointer > subFileParameter.subFileSize) {
             _log.warning("invalid next block pointer: $nextBlockPointer");
             _log.warning("sub-file size: ${subFileParameter.subFileSize}");
             return mapFileReadResult;
@@ -341,10 +420,9 @@ class MapFile extends MapDataStore {
         }
 
         // calculate the size of the current block
-        int currentBlockSize = (nextBlockPointer! - currentBlockPointer);
+        int currentBlockSize = (nextBlockPointer - currentBlockPointer);
         if (currentBlockSize < 0) {
-          _log.warning(
-              "current block size must not be negative: $currentBlockSize");
+          _log.warning("current block size must not be negative: $currentBlockSize");
           return mapFileReadResult;
         } else if (currentBlockSize == 0) {
           // the current block is empty, continue with the next block
@@ -354,35 +432,22 @@ class MapFile extends MapDataStore {
           _log.warning("current block size too large: $currentBlockSize");
           continue;
         } else if (currentBlockPointer + currentBlockSize > this._fileSize) {
-          _log.warning(
-              "current block larger than file size: $currentBlockSize");
+          _log.warning("current block larger than file size: $currentBlockSize");
           return mapFileReadResult;
         }
 
-        // _log.info(
-        //     "Processing block $row/$column from currentBlockPointer ${subFileParameter.startAddress + currentBlockPointer} to nextBlockPointer ${subFileParameter.startAddress + nextBlockPointer} ($currentBlockSize byte)");
-
-        // seek to the current block in the map file
-        // read the current block into the buffer
-        //ReadBuffer readBuffer = new ReadBuffer(inputChannel);
-        Readbuffer readBuffer = await readBufferSource.readFromFile(
-            length: currentBlockSize,
-            offset: subFileParameter.startAddress + currentBlockPointer);
+        String key = "${subFileParameter.startAddress + currentBlockPointer}-$currentBlockSize";
+        Readbuffer readbuffer = await _cache.getOrProduce(key, (key) async {
+          Readbuffer readBuffer = await readBufferSource.readFromFileAt(subFileParameter.startAddress + currentBlockPointer, currentBlockSize);
+          return readBuffer;
+        });
 
         // calculate the top-left coordinates of the underlying tile
-        double tileLatitude = projection
-            .tileYToLatitude((subFileParameter.boundaryTileTop + row));
-        double tileLongitude = projection
-            .tileXToLongitude((subFileParameter.boundaryTileLeft + column));
+        double tileLatitude = subFileParameter.projection.tileYToLatitude((subFileParameter.boundaryTileTop + row));
+        double tileLongitude = subFileParameter.projection.tileXToLongitude((subFileParameter.boundaryTileLeft + column));
 
-        PoiWayBundle poiWayBundle = _processBlock(
-            queryParameters,
-            subFileParameter,
-            boundingBox,
-            tileLatitude,
-            tileLongitude,
-            selector,
-            readBuffer);
+        PoiWayBundle poiWayBundle =
+            _processBlock(queryParameters, subFileParameter, boundingBox, tileLatitude, tileLongitude, selector, Readbuffer.from(readbuffer));
         //_blockCache.set(cacheKey, poiWayBundle);
         mapFileReadResult.add(poiWayBundle);
       }
@@ -403,6 +468,7 @@ class MapFile extends MapDataStore {
   /// @return label data for the tile.
   @override
   Future<DatastoreReadResult> readLabelsSingle(Tile tile) async {
+    await _lateOpen();
     return _readMapDataComplete(tile, tile, MapfileSelector.LABELS);
   }
 
@@ -414,8 +480,8 @@ class MapFile extends MapDataStore {
   /// @param lowerRight tile that defines the lower right corner of the requested area.
   /// @return map data for the tile.
   @override
-  Future<DatastoreReadResult> readLabels(
-      Tile upperLeft, Tile lowerRight) async {
+  Future<DatastoreReadResult> readLabels(Tile upperLeft, Tile lowerRight) async {
+    await _lateOpen();
     return _readMapDataComplete(upperLeft, lowerRight, MapfileSelector.LABELS);
   }
 
@@ -425,8 +491,8 @@ class MapFile extends MapDataStore {
   /// @return the read map data.
   @override
   Future<DatastoreReadResult> readMapDataSingle(Tile tile) async {
-    DatastoreReadResult result =
-        await _readMapDataComplete(tile, tile, MapfileSelector.ALL);
+    await _lateOpen();
+    DatastoreReadResult result = await _readMapDataComplete(tile, tile, MapfileSelector.ALL);
     //print("$_storage");
     return result;
   }
@@ -439,56 +505,51 @@ class MapFile extends MapDataStore {
   /// @param lowerRight tile that defines the lower right corner of the requested area.
   /// @return map data for the tile.
   @override
-  Future<DatastoreReadResult> readMapData(
-      Tile upperLeft, Tile lowerRight) async {
+  Future<DatastoreReadResult> readMapData(Tile upperLeft, Tile lowerRight) async {
+    await _lateOpen();
     return _readMapDataComplete(upperLeft, lowerRight, MapfileSelector.ALL);
   }
 
-  @override
-  Future<void> lateOpen() async {
-    // late reading of header. Necessary for isolates because we cannot transfer a non-null RandomAccessFile descriptor to the isolate.
-    this._fileSize = await readBufferSource!.length();
-    assert(_fileSize > 0);
-    await this._mapFileHeader.readHeader(readBufferSource!, this._fileSize);
+  Future<void> _lateOpen() async {
+    if (_fileSize > 0) return;
+    return _queue.add(() async {
+      if (_fileSize > 0) return;
+      // late reading of header. Necessary for isolates because we cannot transfer a non-null RandomAccessFile descriptor to the isolate.
+      int fileSize = await readBufferSource.length();
+      assert(fileSize > 0);
+      MapfileInfoBuilder mapfileInfoBuilder = MapfileInfoBuilder();
+      await mapfileInfoBuilder.readHeader(readBufferSource, fileSize);
+      this._mapFileInfo = mapfileInfoBuilder.build();
+      _helper = MapfileHelper(_mapFileInfo, preferredLanguage);
+      zoomlevelRange = _mapFileInfo.zoomlevelRange;
+      this._fileSize = fileSize;
+    });
   }
 
-  Future<DatastoreReadResult> _readMapDataComplete(
-      Tile upperLeft, Tile lowerRight, MapfileSelector selector) async {
-    await lateOpen();
-    Projection projection =
-        MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
+  Future<DatastoreReadResult> _readMapDataComplete(Tile upperLeft, Tile lowerRight, MapfileSelector selector) async {
+    Projection projection = MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
     // may happen that upperLeft and lowerRight does not support the tiles but inbetween do
     //assert(supportsTile(upperLeft, projection));
     //assert(supportsTile(lowerRight, projection));
     assert(upperLeft.zoomLevel == lowerRight.zoomLevel);
     Timing timing = Timing(log: _log, active: true, prefix: "${upperLeft}-${lowerRight} ");
-    if (upperLeft.tileX > lowerRight.tileX ||
-        upperLeft.tileY > lowerRight.tileY) {
-      throw Exception(
-          "upperLeft tile must be above and left of lowerRight tile");
+    if (upperLeft.tileX > lowerRight.tileX || upperLeft.tileY > lowerRight.tileY) {
+      throw Exception("upperLeft tile must be above and left of lowerRight tile");
     }
     QueryParameters queryParameters = new QueryParameters();
-    queryParameters.queryZoomLevel =
-        this._mapFileHeader.getQueryZoomLevel(upperLeft.zoomLevel);
+    queryParameters.queryZoomLevel = this._mapFileInfo.getQueryZoomLevel(upperLeft.zoomLevel);
 
     // get and check the sub-file for the query zoom level
-    SubFileParameter? subFileParameter =
-        this._mapFileHeader.getSubFileParameter(queryParameters.queryZoomLevel);
+    SubFileParameter? subFileParameter = this._mapFileInfo.getSubFileParameter(queryParameters.queryZoomLevel);
     if (subFileParameter == null) {
-      throw Exception(
-          "no sub-file for zoom level: ${queryParameters.queryZoomLevel}");
+      throw Exception("no sub-file for zoom level: ${queryParameters.queryZoomLevel}");
     }
     queryParameters.calculateBaseTiles(upperLeft, lowerRight, subFileParameter);
     queryParameters.calculateBlocks(subFileParameter);
-    timing.lap(100,
-          "readMapDataComplete for query $queryParameters");
-    DatastoreReadResult? result = await processBlocks(
-        readBufferSource!,
-        queryParameters,
-        subFileParameter,
-        projection.boundingBoxOfTiles(upperLeft, lowerRight),
-        selector);
-      timing.lap(100, "readMapDataComplete for $queryParameters");
+    timing.lap(100, "readMapDataComplete for query $queryParameters");
+    DatastoreReadResult? result =
+        await processBlocks(readBufferSource, queryParameters, subFileParameter, projection.boundingBoxOfTiles(upperLeft, lowerRight), selector);
+    timing.done(100, "readMapDataComplete for $queryParameters");
     //readBufferMaster.close();
     return result;
   }
@@ -501,6 +562,7 @@ class MapFile extends MapDataStore {
    */
   @override
   Future<DatastoreReadResult?> readPoiDataSingle(Tile tile) async {
+    await _lateOpen();
     return _readMapDataComplete(tile, tile, MapfileSelector.POIS);
   }
 
@@ -514,15 +576,13 @@ class MapFile extends MapDataStore {
    * @return map data for the tile.
    */
   @override
-  Future<DatastoreReadResult?> readPoiData(
-      Tile upperLeft, Tile lowerRight) async {
+  Future<DatastoreReadResult?> readPoiData(Tile upperLeft, Tile lowerRight) async {
+    await _lateOpen();
     return _readMapDataComplete(upperLeft, lowerRight, MapfileSelector.POIS);
   }
 
-  List<List<int>> _readZoomTable(
-      SubFileParameter subFileParameter, Readbuffer readBuffer) {
-    int rows =
-        subFileParameter.zoomLevelMax - subFileParameter.zoomLevelMin + 1;
+  List<List<int>> _readZoomTable(SubFileParameter subFileParameter, Readbuffer readBuffer) {
+    int rows = subFileParameter.zoomLevelMax - subFileParameter.zoomLevelMin + 1;
     List<List<int>> zoomTable = [];
 
     int cumulatedNumberOfPois = 0;
@@ -548,8 +608,7 @@ class MapFile extends MapDataStore {
    * @param maxZoom maximum zoom level supported
    */
   void restrictToZoomRange(int minZoom, int maxZoom) {
-    this.zoomLevelMax = maxZoom;
-    this.zoomLevelMin = minZoom;
+    this.zoomlevelRange = ZoomlevelRange(minZoom, maxZoom);
   }
 
   /**
@@ -558,29 +617,39 @@ class MapFile extends MapDataStore {
    */
   @override
   Future<LatLong?> getStartPosition() async {
-    await lateOpen();
-    if (null != getMapFileInfo().startPosition) {
-      return getMapFileInfo().startPosition;
+    await _lateOpen();
+    if (null != getMapHeaderInfo().startPosition) {
+      return getMapHeaderInfo().startPosition;
     }
-    return getMapFileInfo().boundingBox.getCenterPoint();
+    return getMapHeaderInfo().boundingBox.getCenterPoint();
   }
 
   @override
   Future<int?> getStartZoomLevel() async {
-    await lateOpen();
-    if (null != getMapFileInfo().startZoomLevel) {
-      return getMapFileInfo().startZoomLevel;
+    await _lateOpen();
+    if (null != getMapHeaderInfo().startZoomLevel) {
+      return getMapHeaderInfo().startZoomLevel;
     }
     return DEFAULT_START_ZOOM_LEVEL;
   }
 
   @override
-  bool supportsTile(Tile tile, Projection projection) {
-    if (tile.zoomLevel < zoomLevelMin || tile.zoomLevel > zoomLevelMax)
-      return false;
-    return tile
-        .getBoundingBox(projection)
-        .intersects(getMapFileInfo().boundingBox);
+  Future<bool> supportsTile(Tile tile) async {
+    await _lateOpen();
+    if (!zoomlevelRange.matches(tile.zoomLevel)) return false;
+    return tile.getBoundingBox().intersects(getMapHeaderInfo().boundingBox);
+  }
+
+  @override
+  Future<BoundingBox> getBoundingBox() async {
+    await _lateOpen();
+    return getMapHeaderInfo().boundingBox;
+  }
+
+  /// For debugging purposes only
+  //@visibleForTesting
+  MapfileHelper getMapfileHelper() {
+    return _helper;
   }
 }
 

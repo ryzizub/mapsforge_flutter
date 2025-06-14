@@ -3,10 +3,8 @@ import 'dart:math';
 
 import 'package:logging/logging.dart';
 import 'package:mapsforge_flutter/core.dart';
-import 'package:mapsforge_flutter/maps.dart';
 
-import 'datastorereadresult.dart';
-import 'mapdatastore.dart';
+import '../../datastore.dart';
 
 /// A MapDatabase that reads and combines data from multiple map files.
 /// The MultiMapDatabase supports the following modes for reading from multiple files:
@@ -22,10 +20,9 @@ import 'mapdatastore.dart';
 class MultiMapDataStore extends MapDataStore {
   static final _log = new Logger('MultiMapDataStore');
 
-  @override
   BoundingBox? boundingBox;
   final DataPolicy dataPolicy;
-  final List<MapDataStore> mapDatabases;
+  final List<Datastore> mapDatabases;
 
   LatLong? startPosition;
 
@@ -35,22 +32,28 @@ class MultiMapDataStore extends MapDataStore {
       : mapDatabases = [],
         super(null);
 
+  @override
+  void dispose() {
+    mapDatabases.forEach((db) => db.dispose());
+  }
+
   /// adds another mapDataStore
   ///
   /// @param mapDataStore      the mapDataStore to add
   /// @param useStartZoomLevel if true, use the start zoom level of this mapDataStore as the start zoom level
   /// @param useStartPosition  if true, use the start position of this mapDataStore as the start position
-  Future<void> addMapDataStore(MapDataStore mapDataStore,
-      bool useStartZoomLevel, bool useStartPosition) async {
+  Future<void> addMapDataStore(Datastore mapDataStore, bool useStartZoomLevel, bool useStartPosition) async {
     if (this.mapDatabases.contains(mapDataStore)) {
       throw new Exception("Duplicate map database");
     }
     this.mapDatabases.add(mapDataStore);
-    if (useStartZoomLevel) {
-      this.startZoomLevel = await mapDataStore.getStartZoomLevel();
-    }
-    if (useStartPosition) {
-      this.startPosition = await mapDataStore.getStartPosition();
+    if (mapDataStore is MapDataStore) {
+      if (useStartZoomLevel) {
+        this.startZoomLevel = await mapDataStore.getStartZoomLevel();
+      }
+      if (useStartPosition) {
+        this.startPosition = await mapDataStore.getStartPosition();
+      }
     }
     // if (null == this.boundingBox) {
     //   this.boundingBox = mapDataStore.boundingBox;
@@ -60,26 +63,20 @@ class MultiMapDataStore extends MapDataStore {
     // }
   }
 
-  void removeMapDataStore(double minLatitude, double minLongitude,
-      double maxLatitude, double maxLongitude) {
-    mapDatabases.removeWhere((MapDataStore mapDataStore) {
-      if (mapDataStore.boundingBox!.minLatitude == minLatitude &&
-          mapDataStore.boundingBox!.maxLatitude == maxLatitude &&
-          mapDataStore.boundingBox!.minLongitude == minLongitude &&
-          mapDataStore.boundingBox!.maxLongitude == maxLongitude) return true;
-      return false;
-    });
-    if (this.boundingBox != null) {
-      // recalc boundingbox
-      this.boundingBox = null;
-      mapDatabases.forEach((mapDataStore) {
+  Future<void> removeMapDataStore(double minLatitude, double minLongitude, double maxLatitude, double maxLongitude) async {
+    BoundingBox toRemove = BoundingBox(minLatitude, minLongitude, maxLatitude, maxLongitude);
+    this.boundingBox = null;
+    for (Datastore datastore in List.from(mapDatabases)) {
+      BoundingBox boundingBox = await datastore.getBoundingBox();
+      if (toRemove.intersects(boundingBox)) {
+        mapDatabases.remove(datastore);
+      } else {
         if (null == this.boundingBox) {
-          this.boundingBox = mapDataStore.boundingBox;
+          this.boundingBox = boundingBox;
         } else {
-          this.boundingBox =
-              this.boundingBox!.extendBoundingBox(mapDataStore.boundingBox!);
+          this.boundingBox = this.boundingBox!.extendBoundingBox(boundingBox);
         }
-      });
+      }
     }
   }
 
@@ -97,12 +94,11 @@ class MultiMapDataStore extends MapDataStore {
   /// @param tile A tile.
   /// @return the timestamp of the data used to render the tile
   @override
-  int? getDataTimestamp(Tile tile) {
-    Projection projection = MercatorProjection.fromZoomlevel(tile.zoomLevel);
+  Future<int?> getDataTimestamp(Tile tile) async {
     switch (this.dataPolicy) {
       case DataPolicy.RETURN_FIRST:
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(tile, projection)) {
+        for (Datastore mdb in mapDatabases) {
+          if (mdb is MapDataStore && (await mdb.supportsTile(tile))) {
             return mdb.getDataTimestamp(tile);
           }
         }
@@ -110,9 +106,9 @@ class MultiMapDataStore extends MapDataStore {
       case DataPolicy.RETURN_ALL:
       case DataPolicy.DEDUPLICATE:
         int result = 0;
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(tile, projection)) {
-            result = max(result, mdb.getDataTimestamp(tile)!);
+        for (Datastore mdb in mapDatabases) {
+          if (mdb is MapDataStore && (await mdb.supportsTile(tile))) {
+            result = max(result, (await mdb.getDataTimestamp(tile))!);
           }
         }
         return result;
@@ -124,10 +120,8 @@ class MultiMapDataStore extends MapDataStore {
   Future<DatastoreReadResult?> readLabelsSingle(Tile tile) async {
     switch (this.dataPolicy) {
       case DataPolicy.RETURN_FIRST:
-        Projection projection =
-            MercatorProjection.fromZoomlevel(tile.zoomLevel);
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(tile, projection)) {
+        for (Datastore mdb in mapDatabases) {
+          if ((await mdb.supportsTile(tile))) {
             return mdb.readLabelsSingle(tile);
           }
         }
@@ -140,35 +134,37 @@ class MultiMapDataStore extends MapDataStore {
     //throw new Exception("Invalid data policy for multi map database");
   }
 
-  Future<DatastoreReadResult> _readLabelsDedup(
-      Tile tile, bool deduplicate) async {
-    Projection projection = MercatorProjection.fromZoomlevel(tile.zoomLevel);
-    DatastoreReadResult mapReadResult =
-        DatastoreReadResult(pointOfInterests: [], ways: []);
-    for (MapDataStore mdb in mapDatabases) {
-      if (mdb.supportsTile(tile, projection)) {
-        //_log.info("Tile ${tile.toString()} is supported by ${mdb.toString()}");
-        DatastoreReadResult? result = await mdb.readLabelsSingle(tile);
-        if (result == null) {
-          continue;
+  Future<DatastoreReadResult> _readLabelsDedup(Tile tile, bool deduplicate) async {
+    DatastoreReadResult mapReadResult = DatastoreReadResult(pointOfInterests: [], ways: []);
+    List<Future<DatastoreReadResult?>> futures = [];
+    for (Datastore mdb in List.from(mapDatabases)) {
+      futures.add(() async {
+        if ((await mdb.supportsTile(tile))) {
+          //_log.info("Tile ${tile.toString()} is supported by ${mdb.toString()}");
+          DatastoreReadResult? result = await mdb.readLabelsSingle(tile);
+          return result;
         }
-        bool isWater = mapReadResult.isWater & result.isWater;
-        mapReadResult.isWater = isWater;
-        mapReadResult.addDeduplicate(result, deduplicate);
-      }
+        return null;
+      }());
     }
+    List<DatastoreReadResult?> results = await Future.wait(futures);
+    results.forEach((result) {
+      if (result == null) {
+        return;
+      }
+      bool isWater = mapReadResult.isWater & result.isWater;
+      mapReadResult.isWater = isWater;
+      mapReadResult.addDeduplicate(result, deduplicate);
+    });
     return mapReadResult;
   }
 
   @override
-  Future<DatastoreReadResult?> readLabels(
-      Tile upperLeft, Tile lowerRight) async {
+  Future<DatastoreReadResult?> readLabels(Tile upperLeft, Tile lowerRight) async {
     switch (this.dataPolicy) {
       case DataPolicy.RETURN_FIRST:
-        Projection projection =
-            MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(upperLeft, projection)) {
+        for (Datastore mdb in mapDatabases) {
+          if ((await mdb.supportsTile(upperLeft))) {
             return mdb.readLabels(upperLeft, lowerRight);
           }
         }
@@ -181,16 +177,11 @@ class MultiMapDataStore extends MapDataStore {
     //throw new Exception("Invalid data policy for multi map database");
   }
 
-  Future<DatastoreReadResult> _readLabels(
-      Tile upperLeft, Tile lowerRight, bool deduplicate) async {
-    DatastoreReadResult mapReadResult =
-        new DatastoreReadResult(pointOfInterests: [], ways: []);
-    Projection projection =
-        MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
-    for (MapDataStore mdb in mapDatabases) {
-      if (mdb.supportsTile(upperLeft, projection)) {
-        DatastoreReadResult? result =
-            await mdb.readLabels(upperLeft, lowerRight);
+  Future<DatastoreReadResult> _readLabels(Tile upperLeft, Tile lowerRight, bool deduplicate) async {
+    DatastoreReadResult mapReadResult = new DatastoreReadResult(pointOfInterests: [], ways: []);
+    for (Datastore mdb in mapDatabases) {
+      if ((await mdb.supportsTile(upperLeft))) {
+        DatastoreReadResult? result = await mdb.readLabels(upperLeft, lowerRight);
         if (result == null) {
           continue;
         }
@@ -206,10 +197,8 @@ class MultiMapDataStore extends MapDataStore {
   Future<DatastoreReadResult?> readMapDataSingle(Tile tile) async {
     switch (this.dataPolicy) {
       case DataPolicy.RETURN_FIRST:
-        Projection projection =
-            MercatorProjection.fromZoomlevel(tile.zoomLevel);
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(tile, projection)) {
+        for (Datastore mdb in mapDatabases) {
+          if ((await mdb.supportsTile(tile))) {
             return mdb.readMapDataSingle(tile);
           }
         }
@@ -223,41 +212,43 @@ class MultiMapDataStore extends MapDataStore {
   }
 
   Future<DatastoreReadResult?> _readMapData(Tile tile, bool deduplicate) async {
-    DatastoreReadResult mapReadResult =
-        new DatastoreReadResult(pointOfInterests: [], ways: []);
-    bool found = false;
-    Projection projection = MercatorProjection.fromZoomlevel(tile.zoomLevel);
-    for (MapDataStore mdb in List.of(mapDatabases)) {
-      if (mdb.supportsTile(tile, projection)) {
-        //_log.info("Tile2 ${tile.toString()} is supported by ${mdb.toString()}");
-        try {
-          DatastoreReadResult? result = await mdb.readMapDataSingle(tile);
-          if (result == null) {
-            continue;
+    DatastoreReadResult mapReadResult = new DatastoreReadResult(pointOfInterests: [], ways: []);
+    List<Future<DatastoreReadResult?>> futures = [];
+    for (Datastore mdb in List.of(mapDatabases)) {
+      try {
+        futures.add(() async {
+          if ((await mdb.supportsTile(tile))) {
+            DatastoreReadResult? result = await mdb.readMapDataSingle(tile);
+            return result;
           }
-          found = true;
-          bool isWater = mapReadResult.isWater & result.isWater;
-          mapReadResult.isWater = isWater;
-          mapReadResult.addDeduplicate(result, deduplicate);
-        } on FileNotFoundException catch (error) {
-          _log.warning("File ${error.filename} missing, removing mapfile now");
-          mapDatabases.remove(mdb);
-        }
+          return null;
+        }());
+      } on FileNotFoundException catch (error) {
+        _log.warning("File ${error.filename} missing, removing mapfile now");
+        mapDatabases.remove(mdb);
       }
+    }
+    bool found = false;
+    List<DatastoreReadResult?> results = await Future.wait(futures);
+    for (DatastoreReadResult? result in results) {
+      if (result == null) {
+        continue;
+      }
+      found = true;
+      bool isWater = mapReadResult.isWater & result.isWater;
+      mapReadResult.isWater = isWater;
+      mapReadResult.addDeduplicate(result, deduplicate);
     }
     if (!found) return null;
     return mapReadResult;
   }
 
   @override
-  Future<DatastoreReadResult> readMapData(
-      Tile upperLeft, Tile lowerRight) async {
+  Future<DatastoreReadResult> readMapData(Tile upperLeft, Tile lowerRight) async {
     switch (this.dataPolicy) {
       case DataPolicy.RETURN_FIRST:
-        Projection projection =
-            MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(upperLeft, projection)) {
+        for (Datastore mdb in mapDatabases) {
+          if ((await mdb.supportsTile(upperLeft))) {
             return mdb.readMapData(upperLeft, lowerRight);
           }
         }
@@ -270,18 +261,13 @@ class MultiMapDataStore extends MapDataStore {
     //throw new Exception("Invalid data policy for multi map database");
   }
 
-  Future<DatastoreReadResult> _readMapDataDedup(
-      Tile upperLeft, Tile lowerRight, bool deduplicate) async {
-    DatastoreReadResult mapReadResult =
-        new DatastoreReadResult(pointOfInterests: [], ways: []);
+  Future<DatastoreReadResult> _readMapDataDedup(Tile upperLeft, Tile lowerRight, bool deduplicate) async {
+    DatastoreReadResult mapReadResult = new DatastoreReadResult(pointOfInterests: [], ways: []);
     bool found = false;
-    Projection projection =
-        MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
-    for (MapDataStore mdb in mapDatabases) {
-      if (mdb.supportsTile(upperLeft, projection)) {
+    for (Datastore mdb in mapDatabases) {
+      if ((await mdb.supportsTile(upperLeft))) {
         //_log.info("Tile3 ${upperLeft.toString()} is supported by ${mdb.toString()}");
-        DatastoreReadResult result =
-            await mdb.readMapData(upperLeft, lowerRight);
+        DatastoreReadResult result = await mdb.readMapData(upperLeft, lowerRight);
         found = true;
         bool isWater = mapReadResult.isWater & result.isWater;
         mapReadResult.isWater = isWater;
@@ -296,10 +282,8 @@ class MultiMapDataStore extends MapDataStore {
   Future<DatastoreReadResult?> readPoiDataSingle(Tile tile) async {
     switch (this.dataPolicy) {
       case DataPolicy.RETURN_FIRST:
-        Projection projection =
-            MercatorProjection.fromZoomlevel(tile.zoomLevel);
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(tile, projection)) {
+        for (Datastore mdb in mapDatabases) {
+          if ((await mdb.supportsTile(tile))) {
             return mdb.readPoiDataSingle(tile);
           }
         }
@@ -313,11 +297,9 @@ class MultiMapDataStore extends MapDataStore {
   }
 
   Future<DatastoreReadResult> _readPoiData(Tile tile, bool deduplicate) async {
-    DatastoreReadResult mapReadResult =
-        new DatastoreReadResult(pointOfInterests: [], ways: []);
-    Projection projection = MercatorProjection.fromZoomlevel(tile.zoomLevel);
-    for (MapDataStore mdb in mapDatabases) {
-      if (mdb.supportsTile(tile, projection)) {
+    DatastoreReadResult mapReadResult = new DatastoreReadResult(pointOfInterests: [], ways: []);
+    for (Datastore mdb in mapDatabases) {
+      if ((await mdb.supportsTile(tile))) {
         DatastoreReadResult? result = await mdb.readPoiDataSingle(tile);
         if (result == null) {
           continue;
@@ -331,14 +313,11 @@ class MultiMapDataStore extends MapDataStore {
   }
 
   @override
-  Future<DatastoreReadResult?> readPoiData(
-      Tile upperLeft, Tile lowerRight) async {
+  Future<DatastoreReadResult?> readPoiData(Tile upperLeft, Tile lowerRight) async {
     switch (this.dataPolicy) {
       case DataPolicy.RETURN_FIRST:
-        Projection projection =
-            MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
-        for (MapDataStore mdb in mapDatabases) {
-          if (mdb.supportsTile(upperLeft, projection)) {
+        for (Datastore mdb in mapDatabases) {
+          if ((await mdb.supportsTile(upperLeft))) {
             return mdb.readPoiData(upperLeft, lowerRight);
           }
         }
@@ -351,16 +330,11 @@ class MultiMapDataStore extends MapDataStore {
     //throw new Exception("Invalid data policy for multi map database");
   }
 
-  Future<DatastoreReadResult> _readPoiDataDedup(
-      Tile upperLeft, Tile lowerRight, bool deduplicate) async {
-    DatastoreReadResult mapReadResult =
-        new DatastoreReadResult(pointOfInterests: [], ways: []);
-    Projection projection =
-        MercatorProjection.fromZoomlevel(upperLeft.zoomLevel);
-    for (MapDataStore mdb in mapDatabases) {
-      if (mdb.supportsTile(upperLeft, projection)) {
-        DatastoreReadResult? result =
-            await mdb.readPoiData(upperLeft, lowerRight);
+  Future<DatastoreReadResult> _readPoiDataDedup(Tile upperLeft, Tile lowerRight, bool deduplicate) async {
+    DatastoreReadResult mapReadResult = new DatastoreReadResult(pointOfInterests: [], ways: []);
+    for (Datastore mdb in mapDatabases) {
+      if ((await mdb.supportsTile(upperLeft))) {
+        DatastoreReadResult? result = await mdb.readPoiData(upperLeft, lowerRight);
         if (result == null) {
           continue;
         }
@@ -381,20 +355,20 @@ class MultiMapDataStore extends MapDataStore {
   }
 
   @override
-  bool supportsTile(Tile tile, Projection projection) {
-    for (MapDataStore mdb in mapDatabases) {
-      if (mdb.supportsTile(tile, projection)) {
+  Future<bool> supportsTile(Tile tile) async {
+    List<Future<bool>> futures = [];
+    for (Datastore mdb in mapDatabases) {
+      futures.add(() async {
+        return await mdb.supportsTile(tile);
+      }());
+    }
+    List<bool> results = await Future.wait(futures);
+    for (bool result in results) {
+      if (result) {
         return true;
       }
     }
     return false;
-  }
-
-  @override
-  Future<void> lateOpen() async {
-    for (MapDataStore mdb in mapDatabases) {
-      await mdb.lateOpen();
-    }
   }
 
   @override
@@ -405,6 +379,20 @@ class MultiMapDataStore extends MapDataStore {
   @override
   Future<int?> getStartZoomLevel() {
     return Future.value(startZoomLevel);
+  }
+
+  @override
+  Future<BoundingBox> getBoundingBox() async {
+    if (boundingBox != null) return boundingBox!;
+    for (Datastore datastore in List.from(mapDatabases)) {
+      BoundingBox? boundingBox = await datastore.getBoundingBox();
+      if (null == this.boundingBox) {
+        this.boundingBox = boundingBox;
+      } else {
+        this.boundingBox = this.boundingBox!.extendBoundingBox(boundingBox);
+      }
+    }
+    return boundingBox!;
   }
 }
 

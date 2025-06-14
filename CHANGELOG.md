@@ -1,4 +1,12 @@
-## next
+## 3.0.2 - 2025-06-11
+
+* Introducing mapfile-converter
+* manual map rotation
+
+## 3.0.1 - 2025-02-14
+
+* Support for mapfiles running in isolates
+* Multiple concurrent generations of tiles
 
 ## 3.0.0 - 2024-01-20
 

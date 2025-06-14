@@ -1,57 +1,60 @@
 # mapsforge_flutter
 
-Pure offline maps for flutter. This is a port of mapsforge for
-java/android [https://github.com/mapsforge/mapsforge]
+Truly Offline Maps for Flutter. 
 
-The main feature of this library is to read *mapfiles* stored locally at the user's device and
-render the mapfiles on the user's device without internet connection.
+mapsforge_flutter brings pure offline mapping capabilities to Flutter by porting the well-established [mapsforge library](https://github.com/mapsforge/mapsforge) from Java/Android.
 
-> If your users are online while viewing the maps do not use that library. 
-> While it is possible to show online-maps there are much simpler libs available out there to perform this task.
+With this library, you can load and render *mapfiles* directly from a user’s device—no internet connection required. 
+Perfect for offline navigation, custom mapping applications, and seamless user experiences!
 
 ## Screenshots
 
-![Austria offline](https://github.com/mikes222/mapsforge_flutter/blob/master/doc/Screenshot_2021-11-30-13-30-30-638.jpeg)
-![Austria Satellite](https://github.com/mikes222/mapsforge_flutter/blob/master/doc/Screenshot_2021-11-30-13-30-50-948.jpeg)
-![Indoor navigation](https://github.com/mikes222/mapsforge_flutter/blob/master/doc/Screenshot_2021-11-30-13-31-25-355.jpeg)
-![Contour](https://github.com/mikes222/mapsforge_flutter/blob/master/doc/Screenshot_2021-11-30-13-34-11-891.jpeg)
-![City](https://github.com/mikes222/mapsforge_flutter/blob/master/doc/Screenshot_2021-11-30-13-36-05-612.jpeg)
+![Austria offline](https://raw.githubusercontent.com/mikes222/mapsforge_flutter/master/doc/Screenshot_2021-11-30-13-30-30-638.jpeg)
+![Austria Satellite](https://raw.githubusercontent.com/mikes222/mapsforge_flutter/master/doc/Screenshot_2021-11-30-13-30-50-948.jpeg)
+![Indoor navigation](https://raw.githubusercontent.com/mikes222/mapsforge_flutter/master/doc/Screenshot_2021-11-30-13-31-25-355.jpeg)
+![Contour](https://raw.githubusercontent.com/mikes222/mapsforge_flutter/master/doc/Screenshot_2021-11-30-13-34-11-891.jpeg)
+![City](https://raw.githubusercontent.com/mikes222/mapsforge_flutter/master/doc/Screenshot_2021-11-30-13-36-05-612.jpeg)
 
-## Examples
+## Features and Examples
 
-Start with the [simplified_example/README.md](simplified_example/README.md)
+Start with the [simplified_example/README.md](simplified_example/README.md) or explore a wide range of examples in [example/README.md](example/README.md), covering:
 
-Find many more examples in the subdirectory [example/README.md](example/README.md)
-
-- Day and night themes
-- World map
-- Indoor examples
+- Day and Night Themes
+- World Map Support
+- Indoor Mapping
 - Hillshading
-- Context menus
-- Markers
-- Drag'n'drop
-- Online-maps
-- Rotation
+- Context Menus
+- Interactive Markers & Drag-and-Drop
+- Online & Offline Maps
+- Map Rotation
+- Bonus: Convert PBF files to mapsforge files
+- Bonus: Convert PBF files to osm files
 
-## Credits
+## Why mapsforge_flutter?
 
-First and foremost to the author of mapsforge. He has done an outstanding job!
+*Fully Offline*: No internet? No problem! Load and render maps without network access.
 
-Also to the university of chemnitz which implements indoor map support
+*Support for online maps*: If you ADDITIONALLY need online maps you can do so easily with the same codebase and api.
+
+*High Customizability*: Supports custom rendering themes, allowing you to tailor the map’s look and feel.
+
+*Lightweight & Efficient*: Designed for mobile, mapsforge uses optimized mapfiles that provide rich geographical data in a compact format.
+
+*Advanced Features*: Indoor navigation, hillshading, map rotation and more!
 
 ## Getting Started
 
 ### Prerequisites
 
-include the library in your ``pubspec.yaml``:
+Add the library to your ``pubspec.yaml``:
 
 ```yaml
-  mapsforge_flutter: ^3.0.0
+  mapsforge_flutter: ^3.0.1
 ```
 
-Note: For development purposes consider to include the github repository directly.
+For development you can also include the github repository directly.
 
-include a list of all used assets in your ``pubspec.yaml`` (see pubspec file from example project)
+Make sure to list all required assets in your ``pubspec.yaml`` (see pubspec file from example project)
 
 ```yaml
     flutter:
@@ -60,111 +63,141 @@ include a list of all used assets in your ``pubspec.yaml`` (see pubspec file fro
         - packages/mapsforge_flutter/assets/patterns/coniferous.svg
         - packages/mapsforge_flutter/assets/patterns/coniferous_and_deciduous.svg
         - packages/mapsforge_flutter/assets/patterns/deciduous.svg
-      ...
+      # and more
 ```
 
 ### Initializing mapsforge
 
-Load the mapfile which holds the openstreetmap &reg; data
+1. Load a mapfile with openstreetmap &reg; data
 
 > Mapfiles are files specifically designed for mobile use and provide the information about an area in condensed form. Please visit the original project for more information about how to download/generate them.
 
-    MapFile mapFile = await MapFile.from(filename, null, null);
+    Datastore datastore = IsolateMapfile(filename);
 
 or
 
-    MapFile mapFile = await MapFile.using(content, null, null);
+    Datastore datastore = await MapFile.from(filename, null, null);
 
-Note: Destroy the mapfile by calling ``dispose()`` if not needed anymore
+Tip: If reading from memory, use ``MapFile.using(content, null, null)``
 
-Create the cache for assets
+2. Create a symbol cache for assets (e.g. parking signs, bus stop icons)
 
-> assets are mostly small images to display in the map, for example parking signs, bus stop signs and so on
+> Assets are mostly small images to display in the map
 
     SymbolCache symbolCache = FileSymbolCache();
 
-Create the displayModel which defines and holds the view/display settings like maximum zoomLevel.
+3. Define display settings
+
+> Create the displayModel which defines and holds the view/display settings like maximum zoomLevel.
 
     DisplayModel displayModel = DisplayModel();
 
-Note: For crisper maps consider to set the deviceScaleFactor to a higher value, e.g. 2
+Tip: For crisper maps consider to set the deviceScaleFactor to a higher value, e.g. 2
 
-Create the render theme which specifies how to render the informations from the mapfile.
+4. Set up a render theme
 
-> You can think of it like a css-file for mapsforge
+> Render themes define how the map looks—think of them as CSS for mapsforge.
 
     RenderTheme renderTheme = await
     RenderThemeBuilder.create(displayModel, "assets/render_themes/defaultrender.xml");
 
-Create the Renderer.
+5. Create the Renderer.
 
-> The renderer is the rendering engine for the mapfiles. This code does the main work to render the contents of a mapfile together with the design guides from the rendertheme into bitmap tiles. bitmap tiles are png files with a fixed width/height. Multiple tiles together form the mapview.
+> The renderer converts the map data into visual tiles. 
 
     JobRenderer jobRenderer = MapDataStoreRenderer(mapFile, renderTheme, symbolCache, true);
 
-Alternatively use the onlineRenderer instead to provide the tiles from openstreetmap &reg;
-
-> By using the online-renderer you will not need the rendertheme nor the mapfiles.
+*Alternative:* Use an online renderer instead (no mapfiles required)
 
     JobRenderer jobRenderer = MapOnlineRenderer();
 
-Optionally you can create a cache for the bitmap tiles. The tiles will survive a restart but may
-fill the disk space.
+6. Optionally set up a tile cache
+
+> cache rendered tiles for better performance and persistence
 
     TileBitmapCache bitmapCache = await FileTileBitmapCache.create(jobRenderer.getRenderKey());
 
-Note: If storing tiles at the filesystem is not desired one can also use MemoryTileBitmapCache
+or
 
-Glue everything together into two models.
+    TileBitmapCache bitmapCache = await MemoryTileBitmapCache.create();
 
-> The mapModel holds all map-relevant informations whereas the viewModel holds all informations related to how to display the map for the current widget
+7. Integrate everything into MapModel & ViewModel
 
     MapModel mapModel = MapModel(
-      displayModel: displayModel,
-      renderer: jobRenderer,
-      symbolCache: symbolCache,
-      tileBitmapCache: bitmapCache,
+        displayModel: displayModel,
+        renderer: jobRenderer,
+        symbolCache: symbolCache,
+        tileBitmapCache: bitmapCache,
     );
     
     ViewModel viewModel = ViewModel(displayModel: displayModel);
 
-Include the mapView in the ``build()`` method of your APP:
 
-    FlutterMapView(mapModel: mapModel, viewModel: viewModel );
+8. Add the map widget to your Flutter app
 
-Voilà you are done. 
+    Scaffold(
+        body: 
+            MapviewWidget(
+                displayModel: displayModel,
+                createMapModel: () async => mapModel,
+                createViewModel: () async => viewModel,
+            ),
+    );
+
+*Done!* You now have a fully functional offline map in your Flutter app.
 
 ---
 
-In order to change the position in the map programmatically call the viewModel with the new position
+## Dynamic Map Interaction
+
+Move the map programmatically
 
     viewModel.setMapViewPosition(48.0901926 , 16.308939);
 
-Similar methods exists for zooming.
+Additional methods exists for zooming and rotation.
+
+---
+
+## Credits
+
+A huge shout-out to the original mapsforge developer for building such an incredible project! 
+Also, thanks to Chemnitz University of Technology for implementing indoor map support.
 
 ## License
 
-Same license as the original mapsforge project. LPGL-v3
+mapsforge_flutter is released under the LGPL-v3 license, just like the original mapsforge project.
 
-## Contribution
+## Contributing
 
-Help is appreciated...
-
-If you find some bug or make enhancements feel free to contribute via PullRequests. 
-Also feel free to create bug reports in github.
+We welcome contributions! If you find a bug or have an enhancement, feel free to submit a Pull Request or create an issue on GitHub.
 
 ## Recent changes
 
+### IsolateMapfile Support
+
+The system now supports mapfiles running in isolates. Instead of using ``Mapfile.from()`` just use ``IsolateMapfile()``
+
+### Marker Context Update
+
 Use ``MarkerContext`` instead of ``MarkerCallback`` for markers.
 
-Avoid using mapViewPosition.getLeftUpper(). Use mapViewPosition.getCenter() instead.
+### leftUpper()
+
+Avoid using ``mapViewPosition.getLeftUpper()``. Use ``mapViewPosition.getCenter()`` instead.
+
+### Changes for markers
+
 In markers use ``markerContext.mapCenter``.
+
 This is because we do not redraw the map for every position-update but rather only if the position
-gets out of the boundary of the map. ``mapViewPosition.getCenter()`` returns the CURRENT center (=position)
+gets out of the boundary of the map. 
+``mapViewPosition.getCenter()`` returns the CURRENT center (=position)
 whereas ``markerContext.mapCenter`` returns the center of the map which may be different if the map moved since the 
 last redraw.
 
-instead of 
+### Improved Marker Captions
+
+Old method: 
 
     xxxMarker(
         markerCaption: MarkerCaption(
@@ -173,7 +206,7 @@ instead of
         ),
     )
 
-use
+New method:
 
     xxxxMarker(
         ...
@@ -181,6 +214,25 @@ use
         caption: "abc",
         ...
     );
+
+### Problems with impeller
+
+Impeller is the new rendering engine for flutter. 
+It seems there are still some problems with it. In case you experience some flaws try disabling impeller. 
+
+To disable impeller add this parameter as "additional run args": 
+
+``--no-enable-impeller``
+
+or 
+
+in ``AndroidManifest.xml``:
+
+    <meta-data
+    android:name="io.flutter.embedding.android.EnableImpeller"
+    android:value="false" />
+
+*Note:* Give impeller a chance and enable it from time to time to see if it already working for you.
 
 ## Documentation
 
@@ -193,3 +245,11 @@ See [doc/combine_osm_files.md](doc/combine_osm_files.md)
 See [doc/build_indoor_map_files.md](doc/build_indoor_map_files.md)
 
 See [doc/render_indoor_elements.md](doc/render_indoor_elements.md)
+
+See [doc/overlay.md](doc/overlay.md)
+
+## Important
+
+If your app requires an internet connection, consider using a simpler online mapping library instead. mapsforge_flutter is optimized for offline maps.
+
+Start building your offline mapping experience today with mapsforge_flutter!
