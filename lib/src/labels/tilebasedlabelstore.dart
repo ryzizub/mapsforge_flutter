@@ -13,8 +13,7 @@ import 'labelstore.dart';
 class TileBasedLabelStore implements LabelStore {
   static final _log = new Logger('TileBasedLabelStore');
 
-  final Storage<Tile, List<RenderInfo>> storage =
-      WeakReferenceStorage<Tile, List<RenderInfo>>();
+  final Storage<Tile, List<RenderInfo>> storage = WeakReferenceStorage<Tile, List<RenderInfo>>();
 
   late LruCache<Tile, List<RenderInfo>> _cache;
 
@@ -23,15 +22,15 @@ class TileBasedLabelStore implements LabelStore {
   void debug() {
     _log.info("version: $version, items in Cache: ${_cache.length}");
     storage.keys.forEach((key) {
-      _log.info("Storage: $key - ${storage.get(key)!.value!.length} items");
+      final items = _cache.get(key);
+      if (items != null) {
+        _log.info("Storage: $key - ${items.length} items");
+      }
     });
   }
 
   TileBasedLabelStore(int capacity) {
-    _cache = new LruCache<Tile, List<RenderInfo>>(
-      storage: storage,
-      capacity: capacity,
-    );
+    _cache = new LruCache<Tile, List<RenderInfo>>(storage: storage, capacity: capacity);
   }
 
   void destroy() {
